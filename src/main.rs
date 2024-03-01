@@ -99,7 +99,11 @@ impl VulkanApp {
         };
 
         let vk_result = unsafe {
-            ffi_vk::vkCreateInstance(std::ptr::addr_of!(create_info), std::ptr::null(), std::ptr::addr_of_mut!(self.vk_instance))
+            ffi_vk::vkCreateInstance(
+                std::ptr::addr_of!(create_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(self.vk_instance),
+            )
         };
 
         if vk_result != ffi_vk::VkResult_VK_SUCCESS {
@@ -110,6 +114,10 @@ impl VulkanApp {
     fn main_loop(&mut self) {
         if self.window.is_null() {
             panic!("ERROR: Cannot execute main loop if window is null!");
+        }
+
+        if self.vk_instance.is_null() {
+            panic!("ERROR: Cannot execute main loop if vk_instance is null!");
         }
 
         loop {
