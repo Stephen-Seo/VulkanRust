@@ -45,10 +45,7 @@ impl VulkanApp {
         let app_title = CString::new("Vulkan").unwrap();
         unsafe {
             ffi::glfwInit();
-            ffi::glfwWindowHint(
-                ffi::GLFW_CLIENT_API as i32,
-                ffi::GLFW_NO_API as i32,
-            );
+            ffi::glfwWindowHint(ffi::GLFW_CLIENT_API as i32, ffi::GLFW_NO_API as i32);
             ffi::glfwWindowHint(ffi::GLFW_RESIZABLE as i32, ffi::GLFW_FALSE as i32);
             self.window = ffi::glfwCreateWindow(
                 WINDOW_WIDTH,
@@ -137,7 +134,10 @@ impl VulkanApp {
         );
 
         unsafe {
-            ffi::vkEnumerateInstanceLayerProperties(std::ptr::addr_of_mut!(layer_count), layers.as_mut_ptr());
+            ffi::vkEnumerateInstanceLayerProperties(
+                std::ptr::addr_of_mut!(layer_count),
+                layers.as_mut_ptr(),
+            );
         }
 
         for layer_name in VALIDATION_LAYERS {
