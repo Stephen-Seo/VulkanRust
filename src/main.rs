@@ -15,10 +15,18 @@ mod ffi {
     }
 }
 
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 
 const WINDOW_WIDTH: i32 = 800;
 const WINDOW_HEIGHT: i32 = 600;
+
+#[cfg(debug_assertions)]
+const ENABLE_VALIDATION_LAYERS: bool = true;
+#[cfg(not(debug_assertions))]
+const ENABLE_VALIDATION_LAYERS: bool = false;
+
+const VALIDATION_LAYER_STR_0: &str = "VK_LAYER_KHRONOS_validation\x00";
+const VALIDATION_LAYERS: [&str; 1] = [VALIDATION_LAYER_STR_0];
 
 struct VulkanApp {
     window: *mut ffi::GLFWwindow,
@@ -56,6 +64,11 @@ impl VulkanApp {
     }
 
     fn init_vulkan(&mut self) {
+        // Check validation layers before creating instance.
+        if ENABLE_VALIDATION_LAYERS && !Self::check_validation_layer_support() {
+            panic!("Validation layers requested, but not available!");
+        }
+
         // Create instance.
         let app_name = CString::new("Vulkan Triangle").unwrap();
         let engine_name = CString::new("No Engine").unwrap();
@@ -101,6 +114,50 @@ impl VulkanApp {
         if vk_result != ffi::VkResult_VK_SUCCESS {
             panic!("ERROR: Failed to create vk instance!");
         }
+    }
+
+    fn check_validation_layer_support() -> bool {
+        let mut layer_count: u32 = 0;
+        unsafe {
+            ffi::vkEnumerateInstanceLayerProperties(
+                std::ptr::addr_of_mut!(layer_count),
+                std::ptr::null_mut(),
+            );
+        }
+
+        let mut layers: Vec<ffi::VkLayerProperties> = Vec::with_capacity(layer_count as usize);
+        layers.resize(
+            layer_count as usize,
+            ffi::VkLayerProperties {
+                layerName: [0; 256],
+                specVersion: 0,
+                implementationVersion: 0,
+                description: [0; 256],
+            },
+        );
+
+        unsafe {
+            ffi::vkEnumerateInstanceLayerProperties(std::ptr::addr_of_mut!(layer_count), layers.as_mut_ptr());
+        }
+
+        for layer_name in VALIDATION_LAYERS {
+            let mut layer_found = false;
+            let ln_cstr = unsafe { CStr::from_ptr(layer_name.as_ptr() as *const i8) };
+            for layer_prop in &layers {
+                let lp_cstr: &CStr = unsafe { CStr::from_ptr(layer_prop.layerName.as_ptr()) };
+                if ln_cstr == lp_cstr {
+                    layer_found = true;
+                    break;
+                }
+            }
+
+            if !layer_found {
+                return false;
+            }
+        }
+
+        println!("Validation layers available");
+        true
     }
 
     fn main_loop(&mut self) {
