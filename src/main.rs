@@ -137,14 +137,54 @@ fn is_device_suitable(dev: ffi::VkPhysicalDevice) -> bool {
     // dev_props.deviceType == ffi::VkPhysicalDeviceType_VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
     // && dev_feat.geometryShader != 0
 
-    // Use previous checks for specifics, but for now, accept any GPU.
-    true
+    // Use previous checks for specifics, but for now, accept GPUs that support "graphics family".
+    find_queue_families(dev).graphics_family.is_some()
+}
+
+struct QueueFamilyIndices {
+    graphics_family: Option<u32>,
+}
+
+fn find_queue_families(dev: ffi::VkPhysicalDevice) -> QueueFamilyIndices {
+    let mut queue_fam = QueueFamilyIndices {
+        graphics_family: None,
+    };
+
+    let mut queue_family_count: u32 = 0;
+    unsafe {
+        ffi::vkGetPhysicalDeviceQueueFamilyProperties(
+            dev,
+            std::ptr::addr_of_mut!(queue_family_count),
+            std::ptr::null_mut(),
+        );
+    }
+
+    let mut queue_family_props: Vec<ffi::VkQueueFamilyProperties> =
+        Vec::with_capacity(queue_family_count as usize);
+    queue_family_props.resize(queue_family_count as usize, unsafe { std::mem::zeroed() });
+    unsafe {
+        ffi::vkGetPhysicalDeviceQueueFamilyProperties(
+            dev,
+            std::ptr::addr_of_mut!(queue_family_count),
+            queue_family_props.as_mut_ptr(),
+        );
+    }
+
+    for (idx, queue_family_prop) in queue_family_props.iter().enumerate() {
+        if queue_family_prop.queueFlags & ffi::VkQueueFlagBits_VK_QUEUE_GRAPHICS_BIT != 0 {
+            queue_fam.graphics_family = Some(idx as u32);
+            break;
+        }
+    }
+
+    queue_fam
 }
 
 struct VulkanApp {
     window: *mut ffi::GLFWwindow,
     vk_instance: ffi::VkInstance,
     debug_messenger: ffi::VkDebugUtilsMessengerEXT,
+    physical_device: ffi::VkPhysicalDevice,
 }
 
 impl VulkanApp {
@@ -153,6 +193,7 @@ impl VulkanApp {
             window: std::ptr::null_mut(),
             vk_instance: std::ptr::null_mut(),
             debug_messenger: std::ptr::null_mut(),
+            physical_device: std::ptr::null_mut(),
         }
     }
 
@@ -284,8 +325,6 @@ impl VulkanApp {
     }
 
     fn pick_physical_device(&mut self) {
-        let mut phys_device: ffi::VkPhysicalDevice = std::ptr::null_mut();
-
         let mut dev_count: u32 = 0;
         unsafe {
             ffi::vkEnumeratePhysicalDevices(
@@ -312,12 +351,12 @@ impl VulkanApp {
 
         for phys_dev in phys_dev_handles_vec {
             if is_device_suitable(phys_dev) {
-                phys_device = phys_dev;
+                self.physical_device = phys_dev;
                 break;
             }
         }
 
-        if phys_device.is_null() {
+        if self.physical_device.is_null() {
             panic!("Failed to find a suitable GPU!");
         }
     }
