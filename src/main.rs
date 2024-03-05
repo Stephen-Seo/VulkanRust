@@ -615,6 +615,70 @@ impl VulkanApp {
 
         swap_chain_support_details
     }
+
+    fn choose_swap_surface_format(
+        &self,
+        available_formats: &Vec<ffi::VkSurfaceFormatKHR>,
+    ) -> Option<usize> {
+        if available_formats.is_empty() {
+            return None;
+        }
+
+        for (idx, format) in available_formats.iter().enumerate() {
+            if format.format == ffi::VkFormat_VK_FORMAT_B8G8R8A8_SRGB
+                && format.colorSpace == ffi::VkColorSpaceKHR_VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+            {
+                return Some(idx);
+            }
+        }
+
+        return Some(0);
+    }
+
+    fn choose_swap_present_mode(
+        &self,
+        available_present_modes: &Vec<ffi::VkPresentModeKHR>,
+    ) -> ffi::VkPresentModeKHR {
+        for mode in available_present_modes {
+            if *mode == ffi::VkPresentModeKHR_VK_PRESENT_MODE_MAILBOX_KHR {
+                return ffi::VkPresentModeKHR_VK_PRESENT_MODE_MAILBOX_KHR;
+            }
+        }
+
+        ffi::VkPresentModeKHR_VK_PRESENT_MODE_FIFO_KHR
+    }
+
+    fn choose_swap_extent(&self, capabilities: &ffi::VkSurfaceCapabilitiesKHR) -> ffi::VkExtent2D {
+        if capabilities.currentExtent.width != u32::MAX {
+            return capabilities.currentExtent.clone();
+        }
+
+        let mut width: i32 = 0;
+        let mut height: i32 = 0;
+        unsafe {
+            ffi::glfwGetFramebufferSize(
+                self.window,
+                std::ptr::addr_of_mut!(width),
+                std::ptr::addr_of_mut!(height),
+            );
+        }
+
+        let mut actual_extent = ffi::VkExtent2D {
+            width: width as u32,
+            height: height as u32,
+        };
+
+        actual_extent.width = actual_extent.width.clamp(
+            capabilities.minImageExtent.width,
+            capabilities.maxImageExtent.width,
+        );
+        actual_extent.height = actual_extent.height.clamp(
+            capabilities.minImageExtent.height,
+            capabilities.maxImageExtent.height,
+        );
+
+        actual_extent
+    }
 }
 
 impl Drop for VulkanApp {
