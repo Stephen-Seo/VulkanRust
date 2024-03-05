@@ -27,15 +27,7 @@ fn check_validation_layer_support() -> bool {
     }
 
     let mut layers: Vec<ffi::VkLayerProperties> = Vec::with_capacity(layer_count as usize);
-    layers.resize(
-        layer_count as usize,
-        ffi::VkLayerProperties {
-            layerName: [0; 256],
-            specVersion: 0,
-            implementationVersion: 0,
-            description: [0; 256],
-        },
-    );
+    layers.resize(layer_count as usize, unsafe { std::mem::zeroed() });
 
     unsafe {
         ffi::vkEnumerateInstanceLayerProperties(
