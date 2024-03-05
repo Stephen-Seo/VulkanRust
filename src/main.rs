@@ -123,6 +123,24 @@ fn create_debug_messenger_create_info() -> ffi::VkDebugUtilsMessengerCreateInfoE
     }
 }
 
+fn is_device_suitable(dev: ffi::VkPhysicalDevice) -> bool {
+    let mut dev_props: ffi::VkPhysicalDeviceProperties = unsafe { std::mem::zeroed() };
+    unsafe {
+        ffi::vkGetPhysicalDeviceProperties(dev, std::ptr::addr_of_mut!(dev_props));
+    }
+
+    let mut dev_feat: ffi::VkPhysicalDeviceFeatures = unsafe { std::mem::zeroed() };
+    unsafe {
+        ffi::vkGetPhysicalDeviceFeatures(dev, std::ptr::addr_of_mut!(dev_feat));
+    }
+
+    // dev_props.deviceType == ffi::VkPhysicalDeviceType_VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+    // && dev_feat.geometryShader != 0
+
+    // Use previous checks for specifics, but for now, accept any GPU.
+    true
+}
+
 struct VulkanApp {
     window: *mut ffi::GLFWwindow,
     vk_instance: ffi::VkInstance,
@@ -223,7 +241,8 @@ impl VulkanApp {
             create_info.enabledLayerCount = VALIDATION_LAYERS.len() as u32;
             create_info.ppEnabledLayerNames = VALIDATION_LAYERS.as_ptr() as *const *const i8;
 
-            create_info.pNext = std::ptr::addr_of!(debug_messenger_create_info) as *const std::ffi::c_void;
+            create_info.pNext =
+                std::ptr::addr_of!(debug_messenger_create_info) as *const std::ffi::c_void;
         }
 
         let vk_result = unsafe {
@@ -239,6 +258,7 @@ impl VulkanApp {
         }
 
         self.setup_debug_messenger();
+        self.pick_physical_device();
     }
 
     fn setup_debug_messenger(&mut self) {
@@ -260,6 +280,45 @@ impl VulkanApp {
         );
         if result != ffi::VkResult_VK_SUCCESS {
             panic!("Failed to set up debug messenger!");
+        }
+    }
+
+    fn pick_physical_device(&mut self) {
+        let mut phys_device: ffi::VkPhysicalDevice = std::ptr::null_mut();
+
+        let mut dev_count: u32 = 0;
+        unsafe {
+            ffi::vkEnumeratePhysicalDevices(
+                self.vk_instance,
+                std::ptr::addr_of_mut!(dev_count),
+                std::ptr::null_mut(),
+            );
+        }
+
+        if dev_count == 0 {
+            panic!("Failed to find GPUs with Vulkan support!");
+        }
+
+        let mut phys_dev_handles_vec: Vec<ffi::VkPhysicalDevice> =
+            Vec::with_capacity(dev_count as usize);
+        phys_dev_handles_vec.resize(dev_count as usize, std::ptr::null_mut());
+        unsafe {
+            ffi::vkEnumeratePhysicalDevices(
+                self.vk_instance,
+                std::ptr::addr_of_mut!(dev_count),
+                phys_dev_handles_vec.as_mut_ptr(),
+            );
+        }
+
+        for phys_dev in phys_dev_handles_vec {
+            if is_device_suitable(phys_dev) {
+                phys_device = phys_dev;
+                break;
+            }
+        }
+
+        if phys_device.is_null() {
+            panic!("Failed to find a suitable GPU!");
         }
     }
 
