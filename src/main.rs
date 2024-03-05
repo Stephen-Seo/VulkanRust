@@ -184,6 +184,7 @@ struct VulkanApp {
     window: *mut ffi::GLFWwindow,
     vk_instance: ffi::VkInstance,
     debug_messenger: ffi::VkDebugUtilsMessengerEXT,
+    surface: ffi::VkSurfaceKHR,
     physical_device: ffi::VkPhysicalDevice,
     device: ffi::VkDevice,
     graphics_queue: ffi::VkQueue,
@@ -195,6 +196,7 @@ impl VulkanApp {
             window: std::ptr::null_mut(),
             vk_instance: std::ptr::null_mut(),
             debug_messenger: std::ptr::null_mut(),
+            surface: std::ptr::null_mut(),
             physical_device: std::ptr::null_mut(),
             device: std::ptr::null_mut(),
             graphics_queue: std::ptr::null_mut(),
@@ -228,6 +230,7 @@ impl VulkanApp {
 
         self.create_instance();
         self.setup_debug_messenger();
+        self.create_surface();
         self.pick_physical_device();
         self.create_logical_device();
     }
@@ -376,7 +379,8 @@ impl VulkanApp {
         let indices = find_queue_families(self.physical_device);
 
         let mut dev_queue_create_info: ffi::VkDeviceQueueCreateInfo = unsafe { std::mem::zeroed() };
-        dev_queue_create_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        dev_queue_create_info.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
         dev_queue_create_info.queueFamilyIndex = indices
             .graphics_family
             .expect("\"physical_device\" must support graphics!");
@@ -423,6 +427,20 @@ impl VulkanApp {
         }
     }
 
+    fn create_surface(&mut self) {
+        let result = unsafe {
+            ffi::glfwCreateWindowSurface(
+                self.vk_instance,
+                self.window,
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(self.surface),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            panic!("Failed to create window surface!");
+        }
+    }
+
     fn main_loop(&mut self) {
         if self.window.is_null() {
             panic!("ERROR: Cannot execute main loop if window is null!");
@@ -465,6 +483,12 @@ impl Drop for VulkanApp {
                 }
             } else {
                 println!("WARNING: Failed to load fn to unload debug messenger!");
+            }
+        }
+
+        if !self.surface.is_null() {
+            unsafe {
+                ffi::vkDestroySurfaceKHR(self.vk_instance, self.surface, std::ptr::null());
             }
         }
 
