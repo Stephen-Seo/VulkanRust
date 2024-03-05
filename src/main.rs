@@ -123,6 +123,22 @@ impl QueueFamilyIndices {
     }
 }
 
+struct SwapChainSupportDetails {
+    capabilities: ffi::VkSurfaceCapabilitiesKHR,
+    formats: Vec<ffi::VkSurfaceFormatKHR>,
+    present_modes: Vec<ffi::VkPresentModeKHR>,
+}
+
+impl Default for SwapChainSupportDetails {
+    fn default() -> Self {
+        Self {
+            capabilities: unsafe { std::mem::zeroed() },
+            formats: Vec::new(),
+            present_modes: Vec::new(),
+        }
+    }
+}
+
 struct VulkanApp {
     window: *mut ffi::GLFWwindow,
     vk_instance: ffi::VkInstance,
@@ -486,7 +502,16 @@ impl VulkanApp {
         // && dev_feat.geometryShader != 0
 
         // Use previous checks for specifics, but for now, accept GPUs with required support.
-        self.find_queue_families(dev).is_complete() && self.check_device_extensions_support(dev)
+        let extensions_supported = self.check_device_extensions_support(dev);
+
+        let mut swap_chain_adequate = false;
+        if extensions_supported {
+            let swap_chain_support = self.query_swap_chain_support(dev);
+            swap_chain_adequate = !swap_chain_support.formats.is_empty()
+                && !swap_chain_support.present_modes.is_empty();
+        }
+
+        self.find_queue_families(dev).is_complete() && extensions_supported && swap_chain_adequate
     }
 
     fn check_device_extensions_support(&self, dev: ffi::VkPhysicalDevice) -> bool {
@@ -525,6 +550,70 @@ impl VulkanApp {
         }
 
         req_extensions.is_empty()
+    }
+
+    fn query_swap_chain_support(&self, device: ffi::VkPhysicalDevice) -> SwapChainSupportDetails {
+        if self.surface.is_null() {
+            panic!("surface must be initialized before calling query_swap_chain_support!");
+        }
+
+        let mut swap_chain_support_details = SwapChainSupportDetails::default();
+
+        unsafe {
+            ffi::vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+                device,
+                self.surface,
+                std::ptr::addr_of_mut!(swap_chain_support_details.capabilities),
+            );
+        }
+
+        let mut format_count: u32 = 0;
+        unsafe {
+            ffi::vkGetPhysicalDeviceSurfaceFormatsKHR(
+                device,
+                self.surface,
+                std::ptr::addr_of_mut!(format_count),
+                std::ptr::null_mut(),
+            );
+        }
+        if format_count != 0 {
+            swap_chain_support_details
+                .formats
+                .resize(format_count as usize, unsafe { std::mem::zeroed() });
+            unsafe {
+                ffi::vkGetPhysicalDeviceSurfaceFormatsKHR(
+                    device,
+                    self.surface,
+                    std::ptr::addr_of_mut!(format_count),
+                    swap_chain_support_details.formats.as_mut_ptr(),
+                );
+            }
+        }
+
+        let mut present_mode_count: u32 = 0;
+        unsafe {
+            ffi::vkGetPhysicalDeviceSurfacePresentModesKHR(
+                device,
+                self.surface,
+                std::ptr::addr_of_mut!(present_mode_count),
+                std::ptr::null_mut(),
+            );
+        }
+        if present_mode_count != 0 {
+            swap_chain_support_details
+                .present_modes
+                .resize(present_mode_count as usize, unsafe { std::mem::zeroed() });
+            unsafe {
+                ffi::vkGetPhysicalDeviceSurfacePresentModesKHR(
+                    device,
+                    self.surface,
+                    std::ptr::addr_of_mut!(present_mode_count),
+                    swap_chain_support_details.present_modes.as_mut_ptr(),
+                );
+            }
+        }
+
+        swap_chain_support_details
     }
 }
 
