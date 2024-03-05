@@ -496,7 +496,48 @@ impl VulkanApp {
         // && dev_feat.geometryShader != 0
 
         // Use previous checks for specifics, but for now, accept GPUs with required support.
-        self.find_queue_families(dev).is_complete()
+        self.find_queue_families(dev).is_complete() && self.check_device_extensions_support(dev)
+    }
+
+    fn check_device_extensions_support(&self, dev: ffi::VkPhysicalDevice) -> bool {
+        let req_extensions_vec: Vec<*const std::ffi::c_char> =
+            vec![ffi::VK_KHR_SWAPCHAIN_EXTENSION_NAME as *const u8 as *const std::ffi::c_char];
+
+        let mut req_extensions: HashSet<CString> = HashSet::new();
+        for dev_ext in req_extensions_vec {
+            let cstr = unsafe { CStr::from_ptr(dev_ext) };
+            req_extensions.insert(cstr.to_owned());
+        }
+
+        let mut extension_count: u32 = 0;
+        unsafe {
+            ffi::vkEnumerateDeviceExtensionProperties(
+                dev,
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(extension_count),
+                std::ptr::null_mut(),
+            );
+        }
+
+        let mut available_extensions: Vec<ffi::VkExtensionProperties> =
+            Vec::with_capacity(extension_count as usize);
+        available_extensions.resize(extension_count as usize, unsafe { std::mem::zeroed() });
+        unsafe {
+            ffi::vkEnumerateDeviceExtensionProperties(
+                dev,
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(extension_count),
+                available_extensions.as_mut_ptr(),
+            );
+        }
+
+        for available in available_extensions {
+            let cstr = unsafe { CStr::from_ptr(&available.extensionName as *const i8) };
+            let cstring = cstr.to_owned();
+            req_extensions.remove(&cstring);
+        }
+
+        req_extensions.is_empty()
     }
 }
 
