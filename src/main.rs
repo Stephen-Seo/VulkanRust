@@ -29,6 +29,9 @@ const ENABLE_VALIDATION_LAYERS: bool = false;
 const VALIDATION_LAYER_STR_0: &str = "VK_LAYER_KHRONOS_validation\x00";
 const VALIDATION_LAYERS: [*const u8; 1] = [VALIDATION_LAYER_STR_0.as_ptr()];
 
+const DEVICE_EXTENSIONS: [*const i8; 1] =
+    [ffi::VK_KHR_SWAPCHAIN_EXTENSION_NAME as *const u8 as *const i8];
+
 fn check_validation_layer_support() -> bool {
     let mut layer_count: u32 = 0;
     unsafe {
@@ -361,7 +364,9 @@ impl VulkanApp {
         dev_create_info.queueCreateInfoCount = dev_queue_create_infos.len() as u32;
         dev_create_info.pEnabledFeatures = std::ptr::addr_of!(phys_dev_feat);
 
-        dev_create_info.enabledExtensionCount = 0;
+        dev_create_info.ppEnabledExtensionNames = DEVICE_EXTENSIONS.as_ptr();
+        dev_create_info.enabledExtensionCount = DEVICE_EXTENSIONS.len() as u32;
+
         if ENABLE_VALIDATION_LAYERS {
             dev_create_info.enabledLayerCount = VALIDATION_LAYERS.len() as u32;
             dev_create_info.ppEnabledLayerNames = VALIDATION_LAYERS.as_ptr() as *const *const i8;
@@ -500,11 +505,8 @@ impl VulkanApp {
     }
 
     fn check_device_extensions_support(&self, dev: ffi::VkPhysicalDevice) -> bool {
-        let req_extensions_vec: Vec<*const std::ffi::c_char> =
-            vec![ffi::VK_KHR_SWAPCHAIN_EXTENSION_NAME as *const u8 as *const std::ffi::c_char];
-
         let mut req_extensions: HashSet<CString> = HashSet::new();
-        for dev_ext in req_extensions_vec {
+        for dev_ext in DEVICE_EXTENSIONS {
             let cstr = unsafe { CStr::from_ptr(dev_ext) };
             req_extensions.insert(cstr.to_owned());
         }
