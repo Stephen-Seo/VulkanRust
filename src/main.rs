@@ -222,7 +222,12 @@ impl VulkanApp {
             panic!("Validation layers requested, but not available!");
         }
 
-        // Create instance.
+        self.create_instance();
+        self.setup_debug_messenger();
+        self.pick_physical_device();
+    }
+
+    fn create_instance(&mut self) {
         let app_name = CString::new("Vulkan Triangle").unwrap();
         let engine_name = CString::new("No Engine").unwrap();
         let app_info = ffi::VkApplicationInfo {
@@ -297,9 +302,6 @@ impl VulkanApp {
         if vk_result != ffi::VkResult_VK_SUCCESS {
             panic!("ERROR: Failed to create vk instance!");
         }
-
-        self.setup_debug_messenger();
-        self.pick_physical_device();
     }
 
     fn setup_debug_messenger(&mut self) {
