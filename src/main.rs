@@ -15,6 +15,7 @@ mod ffi {
     }
 }
 
+use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 
 const WINDOW_WIDTH: i32 = 800;
@@ -123,61 +124,15 @@ fn create_debug_messenger_create_info() -> ffi::VkDebugUtilsMessengerCreateInfoE
     }
 }
 
-fn is_device_suitable(dev: ffi::VkPhysicalDevice) -> bool {
-    let mut dev_props: ffi::VkPhysicalDeviceProperties = unsafe { std::mem::zeroed() };
-    unsafe {
-        ffi::vkGetPhysicalDeviceProperties(dev, std::ptr::addr_of_mut!(dev_props));
-    }
-
-    let mut dev_feat: ffi::VkPhysicalDeviceFeatures = unsafe { std::mem::zeroed() };
-    unsafe {
-        ffi::vkGetPhysicalDeviceFeatures(dev, std::ptr::addr_of_mut!(dev_feat));
-    }
-
-    // dev_props.deviceType == ffi::VkPhysicalDeviceType_VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
-    // && dev_feat.geometryShader != 0
-
-    // Use previous checks for specifics, but for now, accept GPUs that support "graphics family".
-    find_queue_families(dev).graphics_family.is_some()
-}
-
 struct QueueFamilyIndices {
     graphics_family: Option<u32>,
+    present_family: Option<u32>,
 }
 
-fn find_queue_families(dev: ffi::VkPhysicalDevice) -> QueueFamilyIndices {
-    let mut queue_fam = QueueFamilyIndices {
-        graphics_family: None,
-    };
-
-    let mut queue_family_count: u32 = 0;
-    unsafe {
-        ffi::vkGetPhysicalDeviceQueueFamilyProperties(
-            dev,
-            std::ptr::addr_of_mut!(queue_family_count),
-            std::ptr::null_mut(),
-        );
+impl QueueFamilyIndices {
+    fn is_complete(&self) -> bool {
+        self.graphics_family.is_some() && self.present_family.is_some()
     }
-
-    let mut queue_family_props: Vec<ffi::VkQueueFamilyProperties> =
-        Vec::with_capacity(queue_family_count as usize);
-    queue_family_props.resize(queue_family_count as usize, unsafe { std::mem::zeroed() });
-    unsafe {
-        ffi::vkGetPhysicalDeviceQueueFamilyProperties(
-            dev,
-            std::ptr::addr_of_mut!(queue_family_count),
-            queue_family_props.as_mut_ptr(),
-        );
-    }
-
-    for (idx, queue_family_prop) in queue_family_props.iter().enumerate() {
-        if queue_family_prop.queueFlags & ffi::VkQueueFlagBits_VK_QUEUE_GRAPHICS_BIT != 0 {
-            queue_fam.graphics_family = Some(idx as u32);
-            break;
-        }
-    }
-
-    queue_fam
 }
 
 struct VulkanApp {
@@ -188,6 +143,7 @@ struct VulkanApp {
     physical_device: ffi::VkPhysicalDevice,
     device: ffi::VkDevice,
     graphics_queue: ffi::VkQueue,
+    present_queue: ffi::VkQueue,
 }
 
 impl VulkanApp {
@@ -200,6 +156,7 @@ impl VulkanApp {
             physical_device: std::ptr::null_mut(),
             device: std::ptr::null_mut(),
             graphics_queue: std::ptr::null_mut(),
+            present_queue: std::ptr::null_mut(),
         }
     }
 
@@ -360,7 +317,7 @@ impl VulkanApp {
         }
 
         for phys_dev in phys_dev_handles_vec {
-            if is_device_suitable(phys_dev) {
+            if self.is_device_suitable(phys_dev) {
                 self.physical_device = phys_dev;
                 break;
             }
@@ -376,25 +333,32 @@ impl VulkanApp {
             panic!("\"physical_device\" must be set before calling \"create_logical_device\"!");
         }
 
-        let indices = find_queue_families(self.physical_device);
+        let indices = self.find_queue_families(self.physical_device);
 
-        let mut dev_queue_create_info: ffi::VkDeviceQueueCreateInfo = unsafe { std::mem::zeroed() };
-        dev_queue_create_info.sType =
-            ffi::VkStructureType_VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        dev_queue_create_info.queueFamilyIndex = indices
-            .graphics_family
-            .expect("\"physical_device\" must support graphics!");
-        dev_queue_create_info.queueCount = 1;
+        let mut dev_queue_create_infos: Vec<ffi::VkDeviceQueueCreateInfo> = Vec::new();
+        let mut unique_queue_families: HashSet<u32> = HashSet::new();
+        unique_queue_families.insert(indices.graphics_family.unwrap());
+        unique_queue_families.insert(indices.present_family.unwrap());
 
         let queue_priority: f32 = 1.0;
-        dev_queue_create_info.pQueuePriorities = std::ptr::addr_of!(queue_priority);
+
+        for queue_family in unique_queue_families {
+            let mut dev_queue_create_info: ffi::VkDeviceQueueCreateInfo =
+                unsafe { std::mem::zeroed() };
+            dev_queue_create_info.sType =
+                ffi::VkStructureType_VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            dev_queue_create_info.queueFamilyIndex = queue_family;
+            dev_queue_create_info.queueCount = 1;
+            dev_queue_create_info.pQueuePriorities = std::ptr::addr_of!(queue_priority);
+            dev_queue_create_infos.push(dev_queue_create_info);
+        }
 
         let mut phys_dev_feat: ffi::VkPhysicalDeviceFeatures = unsafe { std::mem::zeroed() };
 
         let mut dev_create_info: ffi::VkDeviceCreateInfo = unsafe { std::mem::zeroed() };
         dev_create_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        dev_create_info.pQueueCreateInfos = std::ptr::addr_of!(dev_queue_create_info);
-        dev_create_info.queueCreateInfoCount = 1;
+        dev_create_info.pQueueCreateInfos = dev_queue_create_infos.as_ptr();
+        dev_create_info.queueCreateInfoCount = dev_queue_create_infos.len() as u32;
         dev_create_info.pEnabledFeatures = std::ptr::addr_of!(phys_dev_feat);
 
         dev_create_info.enabledExtensionCount = 0;
@@ -423,6 +387,12 @@ impl VulkanApp {
                 indices.graphics_family.unwrap(),
                 0,
                 std::ptr::addr_of_mut!(self.graphics_queue),
+            );
+            ffi::vkGetDeviceQueue(
+                self.device,
+                indices.present_family.unwrap(),
+                0,
+                std::ptr::addr_of_mut!(self.present_queue),
             );
         }
     }
@@ -458,6 +428,75 @@ impl VulkanApp {
                 ffi::glfwPollEvents();
             }
         }
+    }
+
+    fn find_queue_families(&self, dev: ffi::VkPhysicalDevice) -> QueueFamilyIndices {
+        let mut queue_fam = QueueFamilyIndices {
+            graphics_family: None,
+            present_family: None,
+        };
+
+        let mut queue_family_count: u32 = 0;
+        unsafe {
+            ffi::vkGetPhysicalDeviceQueueFamilyProperties(
+                dev,
+                std::ptr::addr_of_mut!(queue_family_count),
+                std::ptr::null_mut(),
+            );
+        }
+
+        let mut queue_family_props: Vec<ffi::VkQueueFamilyProperties> =
+            Vec::with_capacity(queue_family_count as usize);
+        queue_family_props.resize(queue_family_count as usize, unsafe { std::mem::zeroed() });
+        unsafe {
+            ffi::vkGetPhysicalDeviceQueueFamilyProperties(
+                dev,
+                std::ptr::addr_of_mut!(queue_family_count),
+                queue_family_props.as_mut_ptr(),
+            );
+        }
+
+        for (idx, queue_family_prop) in queue_family_props.iter().enumerate() {
+            let mut present_support: ffi::VkBool32 = ffi::VK_FALSE;
+            unsafe {
+                ffi::vkGetPhysicalDeviceSurfaceSupportKHR(
+                    dev,
+                    idx as u32,
+                    self.surface,
+                    std::ptr::addr_of_mut!(present_support),
+                );
+            }
+            if present_support != ffi::VK_FALSE {
+                queue_fam.present_family = Some(idx as u32);
+            }
+            if queue_family_prop.queueFlags & ffi::VkQueueFlagBits_VK_QUEUE_GRAPHICS_BIT != 0 {
+                queue_fam.graphics_family = Some(idx as u32);
+            }
+
+            if queue_fam.is_complete() {
+                break;
+            }
+        }
+
+        queue_fam
+    }
+
+    fn is_device_suitable(&self, dev: ffi::VkPhysicalDevice) -> bool {
+        let mut dev_props: ffi::VkPhysicalDeviceProperties = unsafe { std::mem::zeroed() };
+        unsafe {
+            ffi::vkGetPhysicalDeviceProperties(dev, std::ptr::addr_of_mut!(dev_props));
+        }
+
+        let mut dev_feat: ffi::VkPhysicalDeviceFeatures = unsafe { std::mem::zeroed() };
+        unsafe {
+            ffi::vkGetPhysicalDeviceFeatures(dev, std::ptr::addr_of_mut!(dev_feat));
+        }
+
+        // dev_props.deviceType == ffi::VkPhysicalDeviceType_VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+        // && dev_feat.geometryShader != 0
+
+        // Use previous checks for specifics, but for now, accept GPUs with required support.
+        self.find_queue_families(dev).is_complete()
     }
 }
 
