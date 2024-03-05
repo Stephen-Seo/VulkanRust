@@ -185,6 +185,8 @@ struct VulkanApp {
     vk_instance: ffi::VkInstance,
     debug_messenger: ffi::VkDebugUtilsMessengerEXT,
     physical_device: ffi::VkPhysicalDevice,
+    device: ffi::VkDevice,
+    graphics_queue: ffi::VkQueue,
 }
 
 impl VulkanApp {
@@ -194,6 +196,8 @@ impl VulkanApp {
             vk_instance: std::ptr::null_mut(),
             debug_messenger: std::ptr::null_mut(),
             physical_device: std::ptr::null_mut(),
+            device: std::ptr::null_mut(),
+            graphics_queue: std::ptr::null_mut(),
         }
     }
 
@@ -225,6 +229,7 @@ impl VulkanApp {
         self.create_instance();
         self.setup_debug_messenger();
         self.pick_physical_device();
+        self.create_logical_device();
     }
 
     fn create_instance(&mut self) {
@@ -363,6 +368,61 @@ impl VulkanApp {
         }
     }
 
+    fn create_logical_device(&mut self) {
+        if self.physical_device.is_null() {
+            panic!("\"physical_device\" must be set before calling \"create_logical_device\"!");
+        }
+
+        let indices = find_queue_families(self.physical_device);
+
+        let mut dev_queue_create_info: ffi::VkDeviceQueueCreateInfo = unsafe { std::mem::zeroed() };
+        dev_queue_create_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        dev_queue_create_info.queueFamilyIndex = indices
+            .graphics_family
+            .expect("\"physical_device\" must support graphics!");
+        dev_queue_create_info.queueCount = 1;
+
+        let queue_priority: f32 = 1.0;
+        dev_queue_create_info.pQueuePriorities = std::ptr::addr_of!(queue_priority);
+
+        let mut phys_dev_feat: ffi::VkPhysicalDeviceFeatures = unsafe { std::mem::zeroed() };
+
+        let mut dev_create_info: ffi::VkDeviceCreateInfo = unsafe { std::mem::zeroed() };
+        dev_create_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        dev_create_info.pQueueCreateInfos = std::ptr::addr_of!(dev_queue_create_info);
+        dev_create_info.queueCreateInfoCount = 1;
+        dev_create_info.pEnabledFeatures = std::ptr::addr_of!(phys_dev_feat);
+
+        dev_create_info.enabledExtensionCount = 0;
+        if ENABLE_VALIDATION_LAYERS {
+            dev_create_info.enabledLayerCount = VALIDATION_LAYERS.len() as u32;
+            dev_create_info.ppEnabledLayerNames = VALIDATION_LAYERS.as_ptr() as *const *const i8;
+        } else {
+            dev_create_info.enabledLayerCount = 0;
+        }
+
+        let result = unsafe {
+            ffi::vkCreateDevice(
+                self.physical_device,
+                std::ptr::addr_of!(dev_create_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(self.device),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            panic!("Failed to create logical device!");
+        }
+
+        unsafe {
+            ffi::vkGetDeviceQueue(
+                self.device,
+                indices.graphics_family.unwrap(),
+                0,
+                std::ptr::addr_of_mut!(self.graphics_queue),
+            );
+        }
+    }
+
     fn main_loop(&mut self) {
         if self.window.is_null() {
             panic!("ERROR: Cannot execute main loop if window is null!");
@@ -385,6 +445,12 @@ impl VulkanApp {
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
+        if !self.device.is_null() {
+            unsafe {
+                ffi::vkDestroyDevice(self.device, std::ptr::null());
+            }
+        }
+
         if ENABLE_VALIDATION_LAYERS && !self.debug_messenger.is_null() {
             let func_opt: ffi::PFN_vkDestroyDebugUtilsMessengerEXT = unsafe {
                 std::mem::transmute(ffi::vkGetInstanceProcAddr(
