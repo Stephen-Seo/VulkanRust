@@ -148,6 +148,7 @@ struct VulkanApp {
     device: ffi::VkDevice,
     graphics_queue: ffi::VkQueue,
     present_queue: ffi::VkQueue,
+    swap_chain: ffi::VkSwapchainKHR,
 }
 
 impl VulkanApp {
@@ -161,6 +162,7 @@ impl VulkanApp {
             device: std::ptr::null_mut(),
             graphics_queue: std::ptr::null_mut(),
             present_queue: std::ptr::null_mut(),
+            swap_chain: std::ptr::null_mut(),
         }
     }
 
@@ -194,6 +196,7 @@ impl VulkanApp {
         self.create_surface();
         self.pick_physical_device();
         self.create_logical_device();
+        self.create_swap_chain();
     }
 
     fn create_instance(&mut self) {
@@ -679,10 +682,82 @@ impl VulkanApp {
 
         actual_extent
     }
+
+    fn create_swap_chain(&mut self) {
+        let swap_chain_support = self.query_swap_chain_support(self.physical_device);
+
+        let surface_format_idx = self
+            .choose_swap_surface_format(&swap_chain_support.formats)
+            .expect("surface format must exist");
+        let present_mode = self.choose_swap_present_mode(&swap_chain_support.present_modes);
+        let extent = self.choose_swap_extent(&swap_chain_support.capabilities);
+
+        let mut image_count: u32 = swap_chain_support.capabilities.minImageCount + 1;
+        if swap_chain_support.capabilities.maxImageCount > 0
+            && image_count > swap_chain_support.capabilities.maxImageCount
+        {
+            image_count = swap_chain_support.capabilities.maxImageCount;
+        }
+
+        let mut create_info: ffi::VkSwapchainCreateInfoKHR = unsafe { std::mem::zeroed() };
+        create_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+        create_info.surface = self.surface;
+
+        create_info.minImageCount = image_count;
+        create_info.imageFormat = swap_chain_support.formats[surface_format_idx].format;
+        create_info.imageColorSpace = swap_chain_support.formats[surface_format_idx].colorSpace;
+        create_info.imageExtent = extent;
+        create_info.imageArrayLayers = 1;
+        create_info.imageUsage = ffi::VkImageUsageFlagBits_VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+        let indices = self.find_queue_families(self.physical_device);
+        let indices_arr: [u32; 2] = [
+            indices.graphics_family.unwrap(),
+            indices.present_family.unwrap(),
+        ];
+
+        if indices.graphics_family != indices.present_family {
+            create_info.imageSharingMode = ffi::VkSharingMode_VK_SHARING_MODE_CONCURRENT;
+            create_info.queueFamilyIndexCount = 2;
+            create_info.pQueueFamilyIndices = indices_arr.as_ptr();
+        } else {
+            create_info.imageSharingMode = ffi::VkSharingMode_VK_SHARING_MODE_EXCLUSIVE;
+            create_info.queueFamilyIndexCount = 0;
+            create_info.pQueueFamilyIndices = std::ptr::null();
+        }
+
+        create_info.preTransform = swap_chain_support.capabilities.currentTransform;
+
+        create_info.compositeAlpha =
+            ffi::VkCompositeAlphaFlagBitsKHR_VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+
+        create_info.presentMode = present_mode;
+        create_info.clipped = ffi::VK_TRUE;
+
+        create_info.oldSwapchain = std::ptr::null_mut();
+
+        let result = unsafe {
+            ffi::vkCreateSwapchainKHR(
+                self.device,
+                std::ptr::addr_of!(create_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(self.swap_chain),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            panic!("Failed to create swap chain!");
+        }
+    }
 }
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
+        if !self.swap_chain.is_null() {
+            unsafe {
+                ffi::vkDestroySwapchainKHR(self.device, self.swap_chain, std::ptr::null());
+            }
+        }
+
         if !self.device.is_null() {
             unsafe {
                 ffi::vkDestroyDevice(self.device, std::ptr::null());
