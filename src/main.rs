@@ -111,6 +111,18 @@ fn create_debug_utils_messenger_ext(
     }
 }
 
+fn create_debug_messenger_create_info() -> ffi::VkDebugUtilsMessengerCreateInfoEXT {
+    ffi::VkDebugUtilsMessengerCreateInfoEXT {
+        sType: ffi::VkStructureType_VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        pNext: std::ptr::null(),
+        flags: 0,
+        messageSeverity: ffi::VkDebugUtilsMessageSeverityFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | ffi::VkDebugUtilsMessageSeverityFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | ffi::VkDebugUtilsMessageSeverityFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+        messageType: ffi::VkDebugUtilsMessageTypeFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | ffi::VkDebugUtilsMessageTypeFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | ffi::VkDebugUtilsMessageTypeFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+        pfnUserCallback: Some(validation_debug_callback),
+        pUserData: std::ptr::null_mut(),
+    }
+}
+
 struct VulkanApp {
     window: *mut ffi::GLFWwindow,
     vk_instance: ffi::VkInstance,
@@ -187,21 +199,13 @@ impl VulkanApp {
         }
 
         // Second populate the struct with necessary info.
-        let create_info = ffi::VkInstanceCreateInfo {
+        let mut create_info = ffi::VkInstanceCreateInfo {
             sType: ffi::VkStructureType_VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
             pNext: std::ptr::null(),
             flags: 0,
             pApplicationInfo: std::ptr::addr_of!(app_info),
-            enabledLayerCount: if ENABLE_VALIDATION_LAYERS {
-                VALIDATION_LAYERS.len() as u32
-            } else {
-                0
-            },
-            ppEnabledLayerNames: if ENABLE_VALIDATION_LAYERS {
-                VALIDATION_LAYERS.as_ptr() as *const *const i8
-            } else {
-                std::ptr::null()
-            },
+            enabledLayerCount: 0,
+            ppEnabledLayerNames: std::ptr::null(),
             enabledExtensionCount: if ENABLE_VALIDATION_LAYERS {
                 ext_count + 1
             } else {
@@ -213,6 +217,14 @@ impl VulkanApp {
                 exts
             },
         };
+
+        let debug_messenger_create_info = create_debug_messenger_create_info();
+        if ENABLE_VALIDATION_LAYERS {
+            create_info.enabledLayerCount = VALIDATION_LAYERS.len() as u32;
+            create_info.ppEnabledLayerNames = VALIDATION_LAYERS.as_ptr() as *const *const i8;
+
+            create_info.pNext = std::ptr::addr_of!(debug_messenger_create_info) as *const std::ffi::c_void;
+        }
 
         let vk_result = unsafe {
             ffi::vkCreateInstance(
@@ -238,15 +250,7 @@ impl VulkanApp {
             panic!("ERROR: Cannot set up debug messenger if vk_instance is not initialized!");
         }
 
-        let create_info = ffi::VkDebugUtilsMessengerCreateInfoEXT {
-            sType: ffi::VkStructureType_VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-            pNext: std::ptr::null(),
-            flags: 0,
-            messageSeverity: ffi::VkDebugUtilsMessageSeverityFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | ffi::VkDebugUtilsMessageSeverityFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | ffi::VkDebugUtilsMessageSeverityFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-            messageType: ffi::VkDebugUtilsMessageTypeFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | ffi::VkDebugUtilsMessageTypeFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | ffi::VkDebugUtilsMessageTypeFlagBitsEXT_VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
-            pfnUserCallback: Some(validation_debug_callback),
-            pUserData: std::ptr::null_mut(),
-        };
+        let create_info = create_debug_messenger_create_info();
 
         let result = create_debug_utils_messenger_ext(
             self.vk_instance,
