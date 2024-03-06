@@ -144,6 +144,7 @@ struct VulkanApp {
     swap_chain_images: Vec<ffi::VkImage>,
     swap_chain_image_format: ffi::VkFormat,
     swap_chain_extent: ffi::VkExtent2D,
+    swap_chain_image_views: Vec<ffi::VkImageView>,
 }
 
 impl VulkanApp {
@@ -161,6 +162,7 @@ impl VulkanApp {
             swap_chain_images: Vec::new(),
             swap_chain_image_format: 0,
             swap_chain_extent: unsafe { std::mem::zeroed() },
+            swap_chain_image_views: Vec::new(),
         }
     }
 
@@ -195,6 +197,7 @@ impl VulkanApp {
         self.pick_physical_device();
         self.create_logical_device();
         self.create_swap_chain();
+        self.create_image_views();
     }
 
     fn create_instance(&mut self) {
@@ -766,10 +769,55 @@ impl VulkanApp {
         self.swap_chain_image_format = swap_chain_support.formats[surface_format_idx].format;
         self.swap_chain_extent = extent;
     }
+
+    fn create_image_views(&mut self) {
+        self.swap_chain_image_views
+            .resize(self.swap_chain_images.len(), std::ptr::null_mut());
+
+        for (idx, image) in self.swap_chain_images.iter().enumerate() {
+            let mut create_info: ffi::VkImageViewCreateInfo = unsafe { std::mem::zeroed() };
+            create_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            create_info.image = image.clone();
+
+            create_info.viewType = ffi::VkImageViewType_VK_IMAGE_VIEW_TYPE_2D;
+            create_info.format = self.swap_chain_image_format;
+
+            create_info.components.r = ffi::VkComponentSwizzle_VK_COMPONENT_SWIZZLE_IDENTITY;
+            create_info.components.g = ffi::VkComponentSwizzle_VK_COMPONENT_SWIZZLE_IDENTITY;
+            create_info.components.b = ffi::VkComponentSwizzle_VK_COMPONENT_SWIZZLE_IDENTITY;
+            create_info.components.a = ffi::VkComponentSwizzle_VK_COMPONENT_SWIZZLE_IDENTITY;
+
+            create_info.subresourceRange.aspectMask =
+                ffi::VkImageAspectFlagBits_VK_IMAGE_ASPECT_COLOR_BIT;
+            create_info.subresourceRange.baseMipLevel = 0;
+            create_info.subresourceRange.levelCount = 1;
+            create_info.subresourceRange.baseArrayLayer = 0;
+            create_info.subresourceRange.layerCount = 1;
+
+            let result = unsafe {
+                ffi::vkCreateImageView(
+                    self.device,
+                    std::ptr::addr_of!(create_info),
+                    std::ptr::null(),
+                    std::ptr::addr_of_mut!(self.swap_chain_image_views[idx]),
+                )
+            };
+            if result != ffi::VkResult_VK_SUCCESS {
+                panic!("Failed to create image view {}!", idx);
+            }
+        }
+    }
 }
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
+        for view in &self.swap_chain_image_views {
+            unsafe {
+                // The type of view is a ptr, so view.clone() merely copies the ptr.
+                ffi::vkDestroyImageView(self.device, view.clone(), std::ptr::null());
+            }
+        }
+
         if !self.swap_chain.is_null() {
             unsafe {
                 ffi::vkDestroySwapchainKHR(self.device, self.swap_chain, std::ptr::null());
