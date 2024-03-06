@@ -654,7 +654,7 @@ impl VulkanApp {
 
     fn choose_swap_extent(&self, capabilities: &ffi::VkSurfaceCapabilitiesKHR) -> ffi::VkExtent2D {
         if capabilities.currentExtent.width != u32::MAX {
-            return capabilities.currentExtent.clone();
+            return capabilities.currentExtent;
         }
 
         let mut width: i32 = 0;
@@ -777,7 +777,7 @@ impl VulkanApp {
         for (idx, image) in self.swap_chain_images.iter().enumerate() {
             let mut create_info: ffi::VkImageViewCreateInfo = unsafe { std::mem::zeroed() };
             create_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            create_info.image = image.clone();
+            create_info.image = *image;
 
             create_info.viewType = ffi::VkImageViewType_VK_IMAGE_VIEW_TYPE_2D;
             create_info.format = self.swap_chain_image_format;
@@ -813,8 +813,7 @@ impl Drop for VulkanApp {
     fn drop(&mut self) {
         for view in &self.swap_chain_image_views {
             unsafe {
-                // The type of view is a ptr, so view.clone() merely copies the ptr.
-                ffi::vkDestroyImageView(self.device, view.clone(), std::ptr::null());
+                ffi::vkDestroyImageView(self.device, *view, std::ptr::null());
             }
         }
 
