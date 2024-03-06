@@ -141,6 +141,9 @@ struct VulkanApp {
     graphics_queue: ffi::VkQueue,
     present_queue: ffi::VkQueue,
     swap_chain: ffi::VkSwapchainKHR,
+    swap_chain_images: Vec<ffi::VkImage>,
+    swap_chain_image_format: ffi::VkFormat,
+    swap_chain_extent: ffi::VkExtent2D,
 }
 
 impl VulkanApp {
@@ -155,6 +158,9 @@ impl VulkanApp {
             graphics_queue: std::ptr::null_mut(),
             present_queue: std::ptr::null_mut(),
             swap_chain: std::ptr::null_mut(),
+            swap_chain_images: Vec::new(),
+            swap_chain_image_format: 0,
+            swap_chain_extent: unsafe { std::mem::zeroed() },
         }
     }
 
@@ -739,6 +745,26 @@ impl VulkanApp {
         if result != ffi::VkResult_VK_SUCCESS {
             panic!("Failed to create swap chain!");
         }
+
+        unsafe {
+            ffi::vkGetSwapchainImagesKHR(
+                self.device,
+                self.swap_chain,
+                std::ptr::addr_of_mut!(image_count),
+                std::ptr::null_mut(),
+            );
+            self.swap_chain_images
+                .resize(image_count as usize, std::ptr::null_mut());
+            ffi::vkGetSwapchainImagesKHR(
+                self.device,
+                self.swap_chain,
+                std::ptr::addr_of_mut!(image_count),
+                self.swap_chain_images.as_mut_ptr(),
+            );
+        }
+
+        self.swap_chain_image_format = swap_chain_support.formats[surface_format_idx].format;
+        self.swap_chain_extent = extent;
     }
 }
 
