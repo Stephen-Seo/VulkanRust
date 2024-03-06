@@ -633,7 +633,7 @@ impl VulkanApp {
             }
         }
 
-        return Some(0);
+        Some(0)
     }
 
     fn choose_swap_present_mode(
