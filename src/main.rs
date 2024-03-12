@@ -131,6 +131,27 @@ impl Default for SwapChainSupportDetails {
     }
 }
 
+struct ShaderModuleWrapper {
+    module: ffi::VkShaderModule,
+    device: ffi::VkDevice,
+}
+
+impl ShaderModuleWrapper {
+    pub fn get_module(&self) -> ffi::VkShaderModule {
+        self.module
+    }
+}
+
+impl Drop for ShaderModuleWrapper {
+    fn drop(&mut self) {
+        if !self.module.is_null() && !self.device.is_null() {
+            unsafe {
+                ffi::vkDestroyShaderModule(self.device, self.module, std::ptr::null());
+            }
+        }
+    }
+}
+
 struct VulkanApp {
     window: *mut ffi::GLFWwindow,
     vk_instance: ffi::VkInstance,
@@ -198,6 +219,8 @@ impl VulkanApp {
         self.create_logical_device();
         self.create_swap_chain();
         self.create_image_views();
+        self.create_graphics_pipeline()
+            .expect("Should be able to set up graphics pipeline");
     }
 
     fn create_instance(&mut self) {
@@ -805,6 +828,84 @@ impl VulkanApp {
             if result != ffi::VkResult_VK_SUCCESS {
                 panic!("Failed to create image view {}!", idx);
             }
+        }
+    }
+
+    fn create_graphics_pipeline(&mut self) -> Result<(), String> {
+        let vert_shader_module = self.create_vertex_shader_module()?;
+        let frag_shader_module = self.create_fragment_shader_module()?;
+
+        let mut vert_shader_stage_info: ffi::VkPipelineShaderStageCreateInfo =
+            unsafe { std::mem::zeroed() };
+        vert_shader_stage_info.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        vert_shader_stage_info.stage = ffi::VkShaderStageFlagBits_VK_SHADER_STAGE_VERTEX_BIT;
+        vert_shader_stage_info.module = vert_shader_module.get_module();
+        vert_shader_stage_info.pName = "main\x00".as_ptr() as *const i8;
+
+        let mut frag_shader_stage_info: ffi::VkPipelineShaderStageCreateInfo =
+            unsafe { std::mem::zeroed() };
+        frag_shader_stage_info.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        frag_shader_stage_info.stage = ffi::VkShaderStageFlagBits_VK_SHADER_STAGE_FRAGMENT_BIT;
+        frag_shader_stage_info.module = frag_shader_module.get_module();
+        frag_shader_stage_info.pName = "main\x00".as_ptr() as *const i8;
+
+        // TODO: Use the *_shader_stage_info structs before vert/frag_shader_module is cleaned up.
+        Ok(())
+    }
+
+    fn create_vertex_shader_module(&mut self) -> Result<ShaderModuleWrapper, String> {
+        let vertex_shader = std::include_bytes!(concat!(env!("OUT_DIR"), "/vert.spv"));
+
+        let mut create_info: ffi::VkShaderModuleCreateInfo = unsafe { std::mem::zeroed() };
+        create_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        create_info.codeSize = vertex_shader.len();
+        create_info.pCode = vertex_shader.as_ptr() as *const u32;
+
+        let mut shader_module: ffi::VkShaderModule = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            ffi::vkCreateShaderModule(
+                self.device,
+                std::ptr::addr_of!(create_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(shader_module),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            Err(String::from("Failed to create vertex shader module!"))
+        } else {
+            Ok(ShaderModuleWrapper {
+                module: shader_module,
+                device: self.device,
+            })
+        }
+    }
+
+    fn create_fragment_shader_module(&mut self) -> Result<ShaderModuleWrapper, String> {
+        let fragment_shader = std::include_bytes!(concat!(env!("OUT_DIR"), "/frag.spv"));
+
+        let mut create_info: ffi::VkShaderModuleCreateInfo = unsafe { std::mem::zeroed() };
+        create_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        create_info.codeSize = fragment_shader.len();
+        create_info.pCode = fragment_shader.as_ptr() as *const u32;
+
+        let mut shader_module: ffi::VkShaderModule = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            ffi::vkCreateShaderModule(
+                self.device,
+                std::ptr::addr_of!(create_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(shader_module),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            Err(String::from("Failed to create fragment shader module!"))
+        } else {
+            Ok(ShaderModuleWrapper {
+                module: shader_module,
+                device: self.device,
+            })
         }
     }
 }
