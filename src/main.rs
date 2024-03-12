@@ -219,18 +219,18 @@ impl VulkanApp {
             panic!("Validation layers requested, but not available!");
         }
 
-        self.create_instance();
-        self.setup_debug_messenger();
-        self.create_surface();
-        self.pick_physical_device();
-        self.create_logical_device();
-        self.create_swap_chain();
-        self.create_image_views();
+        self.create_instance().unwrap();
+        self.setup_debug_messenger().unwrap();
+        self.create_surface().unwrap();
+        self.pick_physical_device().unwrap();
+        self.create_logical_device().unwrap();
+        self.create_swap_chain().unwrap();
+        self.create_image_views().unwrap();
         self.create_graphics_pipeline()
             .expect("Should be able to set up graphics pipeline");
     }
 
-    fn create_instance(&mut self) {
+    fn create_instance(&mut self) -> Result<(), String> {
         let app_name = CString::new("Vulkan Triangle").unwrap();
         let engine_name = CString::new("No Engine").unwrap();
         let app_info = ffi::VkApplicationInfo {
@@ -303,17 +303,23 @@ impl VulkanApp {
         };
 
         if vk_result != ffi::VkResult_VK_SUCCESS {
-            panic!("ERROR: Failed to create vk instance!");
+            return Err(String::from("Failed to create Vulkan instance"));
         }
+
+        Ok(())
     }
 
-    fn setup_debug_messenger(&mut self) {
+    fn setup_debug_messenger(&mut self) -> Result<(), String> {
         if !ENABLE_VALIDATION_LAYERS {
-            return;
+            return Err(String::from(
+                "Cannot setup debug messenger if validation layers is not enabled!",
+            ));
         }
 
         if self.vk_instance.is_null() {
-            panic!("ERROR: Cannot set up debug messenger if vk_instance is not initialized!");
+            return Err(String::from(
+                "Cannot set up debug messenger if vk_instance is not initialized!",
+            ));
         }
 
         let create_info = create_debug_messenger_create_info();
@@ -325,11 +331,13 @@ impl VulkanApp {
             std::ptr::addr_of_mut!(self.debug_messenger),
         );
         if result != ffi::VkResult_VK_SUCCESS {
-            panic!("Failed to set up debug messenger!");
+            return Err(String::from("Failed to set up debug messenger!"));
         }
+
+        Ok(())
     }
 
-    fn pick_physical_device(&mut self) {
+    fn pick_physical_device(&mut self) -> Result<(), String> {
         let mut dev_count: u32 = 0;
         unsafe {
             ffi::vkEnumeratePhysicalDevices(
@@ -340,7 +348,7 @@ impl VulkanApp {
         }
 
         if dev_count == 0 {
-            panic!("Failed to find GPUs with Vulkan support!");
+            return Err(String::from("Failed to find GPUs with Vulkan support!"));
         }
 
         let mut phys_dev_handles_vec: Vec<ffi::VkPhysicalDevice> =
@@ -355,20 +363,24 @@ impl VulkanApp {
         }
 
         for phys_dev in phys_dev_handles_vec {
-            if self.is_device_suitable(phys_dev) {
+            if self.is_device_suitable(phys_dev)? {
                 self.physical_device = phys_dev;
                 break;
             }
         }
 
         if self.physical_device.is_null() {
-            panic!("Failed to find a suitable GPU!");
+            return Err(String::from("Failed to find a suitable GPU!"));
         }
+
+        Ok(())
     }
 
-    fn create_logical_device(&mut self) {
+    fn create_logical_device(&mut self) -> Result<(), String> {
         if self.physical_device.is_null() {
-            panic!("\"physical_device\" must be set before calling \"create_logical_device\"!");
+            return Err(String::from(
+                "\"physical_device\" must be set before calling \"create_logical_device\"!",
+            ));
         }
 
         let indices = self.find_queue_families(self.physical_device);
@@ -418,7 +430,7 @@ impl VulkanApp {
             )
         };
         if result != ffi::VkResult_VK_SUCCESS {
-            panic!("Failed to create logical device!");
+            return Err(String::from("Failed to create logical device!"));
         }
 
         unsafe {
@@ -435,9 +447,11 @@ impl VulkanApp {
                 std::ptr::addr_of_mut!(self.present_queue),
             );
         }
+
+        Ok(())
     }
 
-    fn create_surface(&mut self) {
+    fn create_surface(&mut self) -> Result<(), String> {
         let result = unsafe {
             ffi::glfwCreateWindowSurface(
                 self.vk_instance,
@@ -447,8 +461,10 @@ impl VulkanApp {
             )
         };
         if result != ffi::VkResult_VK_SUCCESS {
-            panic!("Failed to create window surface!");
+            return Err(String::from("Failed to create window surface!"));
         }
+
+        Ok(())
     }
 
     fn main_loop(&mut self) {
@@ -521,7 +537,7 @@ impl VulkanApp {
         queue_fam
     }
 
-    fn is_device_suitable(&self, dev: ffi::VkPhysicalDevice) -> bool {
+    fn is_device_suitable(&self, dev: ffi::VkPhysicalDevice) -> Result<bool, String> {
         let mut dev_props: ffi::VkPhysicalDeviceProperties = unsafe { std::mem::zeroed() };
         unsafe {
             ffi::vkGetPhysicalDeviceProperties(dev, std::ptr::addr_of_mut!(dev_props));
@@ -540,12 +556,14 @@ impl VulkanApp {
 
         let mut swap_chain_adequate = false;
         if extensions_supported {
-            let swap_chain_support = self.query_swap_chain_support(dev);
+            let swap_chain_support = self.query_swap_chain_support(dev)?;
             swap_chain_adequate = !swap_chain_support.formats.is_empty()
                 && !swap_chain_support.present_modes.is_empty();
         }
 
-        self.find_queue_families(dev).is_complete() && extensions_supported && swap_chain_adequate
+        Ok(self.find_queue_families(dev).is_complete()
+            && extensions_supported
+            && swap_chain_adequate)
     }
 
     fn check_device_extensions_support(&self, dev: ffi::VkPhysicalDevice) -> bool {
@@ -586,9 +604,14 @@ impl VulkanApp {
         req_extensions.is_empty()
     }
 
-    fn query_swap_chain_support(&self, device: ffi::VkPhysicalDevice) -> SwapChainSupportDetails {
+    fn query_swap_chain_support(
+        &self,
+        device: ffi::VkPhysicalDevice,
+    ) -> Result<SwapChainSupportDetails, String> {
         if self.surface.is_null() {
-            panic!("surface must be initialized before calling query_swap_chain_support!");
+            return Err(String::from(
+                "surface must be initialized before calling query_swap_chain_support!",
+            ));
         }
 
         let mut swap_chain_support_details = SwapChainSupportDetails::default();
@@ -647,7 +670,7 @@ impl VulkanApp {
             }
         }
 
-        swap_chain_support_details
+        Ok(swap_chain_support_details)
     }
 
     fn choose_swap_surface_format(
@@ -714,8 +737,8 @@ impl VulkanApp {
         actual_extent
     }
 
-    fn create_swap_chain(&mut self) {
-        let swap_chain_support = self.query_swap_chain_support(self.physical_device);
+    fn create_swap_chain(&mut self) -> Result<(), String> {
+        let swap_chain_support = self.query_swap_chain_support(self.physical_device)?;
 
         let surface_format_idx = self
             .choose_swap_surface_format(&swap_chain_support.formats)
@@ -776,7 +799,7 @@ impl VulkanApp {
             )
         };
         if result != ffi::VkResult_VK_SUCCESS {
-            panic!("Failed to create swap chain!");
+            return Err(String::from("Failed to create swap chain!"));
         }
 
         unsafe {
@@ -798,9 +821,11 @@ impl VulkanApp {
 
         self.swap_chain_image_format = swap_chain_support.formats[surface_format_idx].format;
         self.swap_chain_extent = extent;
+
+        Ok(())
     }
 
-    fn create_image_views(&mut self) {
+    fn create_image_views(&mut self) -> Result<(), String> {
         self.swap_chain_image_views
             .resize(self.swap_chain_images.len(), std::ptr::null_mut());
 
@@ -833,9 +858,11 @@ impl VulkanApp {
                 )
             };
             if result != ffi::VkResult_VK_SUCCESS {
-                panic!("Failed to create image view {}!", idx);
+                return Err(format!("Failed to create image view {}!", idx));
             }
         }
+
+        Ok(())
     }
 
     fn create_graphics_pipeline(&mut self) -> Result<(), String> {
@@ -908,7 +935,7 @@ impl VulkanApp {
             )
         };
         if result != ffi::VkResult_VK_SUCCESS {
-            panic!("Failed to create pipeline layout!");
+            return Err(String::from("Failed to create pipeline layout!"));
         }
 
         // TODO: Use the *_shader_stage_info structs before vert/frag_shader_module is cleaned up.
