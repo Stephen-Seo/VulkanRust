@@ -14,6 +14,11 @@ const ENABLE_VALIDATION_LAYERS: bool = false;
 const VALIDATION_LAYER_STR_0: &str = "VK_LAYER_KHRONOS_validation\x00";
 const VALIDATION_LAYERS: [*const u8; 1] = [VALIDATION_LAYER_STR_0.as_ptr()];
 
+const DYNAMIC_STATES: [ffi::VkDynamicState; 2] = [
+    ffi::VkDynamicState_VK_DYNAMIC_STATE_VIEWPORT,
+    ffi::VkDynamicState_VK_DYNAMIC_STATE_SCISSOR,
+];
+
 const DEVICE_EXTENSIONS: [*const i8; 1] =
     [ffi::VK_KHR_SWAPCHAIN_EXTENSION_NAME as *const u8 as *const i8];
 
@@ -166,6 +171,7 @@ struct VulkanApp {
     swap_chain_image_format: ffi::VkFormat,
     swap_chain_extent: ffi::VkExtent2D,
     swap_chain_image_views: Vec<ffi::VkImageView>,
+    pipeline_layout: ffi::VkPipelineLayout,
 }
 
 impl VulkanApp {
@@ -184,6 +190,7 @@ impl VulkanApp {
             swap_chain_image_format: 0,
             swap_chain_extent: unsafe { std::mem::zeroed() },
             swap_chain_image_views: Vec::new(),
+            pipeline_layout: std::ptr::null_mut(),
         }
     }
 
@@ -851,6 +858,59 @@ impl VulkanApp {
         frag_shader_stage_info.module = frag_shader_module.get_module();
         frag_shader_stage_info.pName = "main\x00".as_ptr() as *const i8;
 
+        let shader_stages: [ffi::VkPipelineShaderStageCreateInfo; 2] =
+            [vert_shader_stage_info, frag_shader_stage_info];
+
+        let vertex_input_info = Self::create_vertex_input_state_info_struct();
+
+        let mut input_assembly: ffi::VkPipelineInputAssemblyStateCreateInfo =
+            unsafe { std::mem::zeroed() };
+        input_assembly.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        input_assembly.topology = ffi::VkPrimitiveTopology_VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        input_assembly.primitiveRestartEnable = ffi::VK_FALSE;
+
+        let viewport = self.create_viewport();
+
+        let mut scissor: ffi::VkRect2D = unsafe { std::mem::zeroed() };
+        scissor.offset.x = 0;
+        scissor.offset.y = 0;
+        scissor.extent = self.swap_chain_extent;
+
+        let dynamic_state_info_struct = Self::create_dynamic_state_info_struct();
+
+        let viewport_state = Self::create_viewport_state_info_struct();
+
+        let rasterizer_info = Self::create_rasterizer_info_struct();
+
+        let multisampling_info = Self::create_multisampling_info_struct();
+
+        let color_blend_attachment = Self::create_color_blend_attach_state_struct();
+
+        let color_blend_info_struct =
+            Self::create_color_blend_state_info_struct(std::ptr::addr_of!(color_blend_attachment));
+
+        let mut pipeline_layout_info: ffi::VkPipelineLayoutCreateInfo =
+            unsafe { std::mem::zeroed() };
+        pipeline_layout_info.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipeline_layout_info.setLayoutCount = 0;
+        pipeline_layout_info.pSetLayouts = std::ptr::null();
+        pipeline_layout_info.pushConstantRangeCount = 0;
+        pipeline_layout_info.pPushConstantRanges = std::ptr::null();
+
+        let result = unsafe {
+            ffi::vkCreatePipelineLayout(
+                self.device,
+                std::ptr::addr_of!(pipeline_layout_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(self.pipeline_layout),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            panic!("Failed to create pipeline layout!");
+        }
+
         // TODO: Use the *_shader_stage_info structs before vert/frag_shader_module is cleaned up.
         Ok(())
     }
@@ -908,10 +968,135 @@ impl VulkanApp {
             })
         }
     }
+
+    fn create_dynamic_state_info_struct() -> ffi::VkPipelineDynamicStateCreateInfo {
+        let mut dynamic_state: ffi::VkPipelineDynamicStateCreateInfo =
+            unsafe { std::mem::zeroed() };
+        dynamic_state.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamic_state.dynamicStateCount = DYNAMIC_STATES.len() as u32;
+        dynamic_state.pDynamicStates = DYNAMIC_STATES.as_ptr();
+
+        dynamic_state
+    }
+
+    fn create_vertex_input_state_info_struct() -> ffi::VkPipelineVertexInputStateCreateInfo {
+        let mut vertex_input_info: ffi::VkPipelineVertexInputStateCreateInfo =
+            unsafe { std::mem::zeroed() };
+        vertex_input_info.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertex_input_info.vertexBindingDescriptionCount = 0;
+        vertex_input_info.pVertexBindingDescriptions = std::ptr::null();
+        vertex_input_info.vertexAttributeDescriptionCount = 0;
+        vertex_input_info.pVertexBindingDescriptions = std::ptr::null();
+
+        vertex_input_info
+    }
+
+    fn create_viewport(&mut self) -> ffi::VkViewport {
+        let mut viewport: ffi::VkViewport = unsafe { std::mem::zeroed() };
+        viewport.x = 0.0;
+        viewport.y = 0.0;
+        viewport.width = self.swap_chain_extent.width as f32;
+        viewport.height = self.swap_chain_extent.height as f32;
+        viewport.minDepth = 0.0;
+        viewport.maxDepth = 1.0;
+
+        viewport
+    }
+
+    fn create_viewport_state_info_struct() -> ffi::VkPipelineViewportStateCreateInfo {
+        let mut viewport_state: ffi::VkPipelineViewportStateCreateInfo =
+            unsafe { std::mem::zeroed() };
+        viewport_state.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewport_state.viewportCount = 1;
+        viewport_state.scissorCount = 1;
+
+        viewport_state
+    }
+
+    fn create_rasterizer_info_struct() -> ffi::VkPipelineRasterizationStateCreateInfo {
+        let mut rasterizer_info: ffi::VkPipelineRasterizationStateCreateInfo =
+            unsafe { std::mem::zeroed() };
+        rasterizer_info.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizer_info.depthClampEnable = ffi::VK_FALSE;
+        rasterizer_info.rasterizerDiscardEnable = ffi::VK_FALSE;
+        rasterizer_info.polygonMode = ffi::VkPolygonMode_VK_POLYGON_MODE_FILL;
+        rasterizer_info.lineWidth = 1.0;
+        rasterizer_info.cullMode = ffi::VkCullModeFlagBits_VK_CULL_MODE_BACK_BIT;
+        rasterizer_info.frontFace = ffi::VkFrontFace_VK_FRONT_FACE_CLOCKWISE;
+        rasterizer_info.depthBiasEnable = ffi::VK_FALSE;
+        rasterizer_info.depthBiasConstantFactor = 0.0;
+        rasterizer_info.depthBiasClamp = 0.0;
+        rasterizer_info.depthBiasSlopeFactor = 0.0;
+
+        rasterizer_info
+    }
+
+    fn create_multisampling_info_struct() -> ffi::VkPipelineMultisampleStateCreateInfo {
+        let mut multisampling_info: ffi::VkPipelineMultisampleStateCreateInfo =
+            unsafe { std::mem::zeroed() };
+        multisampling_info.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisampling_info.sampleShadingEnable = ffi::VK_FALSE;
+        multisampling_info.rasterizationSamples = ffi::VkSampleCountFlagBits_VK_SAMPLE_COUNT_1_BIT;
+        multisampling_info.minSampleShading = 1.0;
+        multisampling_info.pSampleMask = std::ptr::null();
+        multisampling_info.alphaToCoverageEnable = ffi::VK_FALSE;
+        multisampling_info.alphaToOneEnable = ffi::VK_FALSE;
+
+        multisampling_info
+    }
+
+    fn create_color_blend_attach_state_struct() -> ffi::VkPipelineColorBlendAttachmentState {
+        let mut color_blend_attachment: ffi::VkPipelineColorBlendAttachmentState =
+            unsafe { std::mem::zeroed() };
+        color_blend_attachment.colorWriteMask =
+            ffi::VkColorComponentFlagBits_VK_COLOR_COMPONENT_R_BIT
+                | ffi::VkColorComponentFlagBits_VK_COLOR_COMPONENT_G_BIT
+                | ffi::VkColorComponentFlagBits_VK_COLOR_COMPONENT_B_BIT
+                | ffi::VkColorComponentFlagBits_VK_COLOR_COMPONENT_A_BIT;
+        color_blend_attachment.blendEnable = ffi::VK_FALSE;
+        color_blend_attachment.srcColorBlendFactor = ffi::VkBlendFactor_VK_BLEND_FACTOR_ONE;
+        color_blend_attachment.dstColorBlendFactor = ffi::VkBlendFactor_VK_BLEND_FACTOR_ZERO;
+        color_blend_attachment.colorBlendOp = ffi::VkBlendOp_VK_BLEND_OP_ADD;
+        color_blend_attachment.srcAlphaBlendFactor = ffi::VkBlendFactor_VK_BLEND_FACTOR_ONE;
+        color_blend_attachment.dstAlphaBlendFactor = ffi::VkBlendFactor_VK_BLEND_FACTOR_ZERO;
+        color_blend_attachment.alphaBlendOp = ffi::VkBlendOp_VK_BLEND_OP_ADD;
+
+        color_blend_attachment
+    }
+
+    fn create_color_blend_state_info_struct(
+        color_blend_attach_ptr: *const ffi::VkPipelineColorBlendAttachmentState,
+    ) -> ffi::VkPipelineColorBlendStateCreateInfo {
+        let mut color_blending: ffi::VkPipelineColorBlendStateCreateInfo =
+            unsafe { std::mem::zeroed() };
+        color_blending.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        color_blending.logicOpEnable = ffi::VK_FALSE;
+        color_blending.logicOp = ffi::VkLogicOp_VK_LOGIC_OP_COPY;
+        color_blending.attachmentCount = 1;
+        color_blending.pAttachments = color_blend_attach_ptr;
+        color_blending.blendConstants[0] = 0.0;
+        color_blending.blendConstants[1] = 0.0;
+        color_blending.blendConstants[2] = 0.0;
+        color_blending.blendConstants[3] = 0.0;
+
+        color_blending
+    }
 }
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
+        if !self.pipeline_layout.is_null() {
+            unsafe {
+                ffi::vkDestroyPipelineLayout(self.device, self.pipeline_layout, std::ptr::null());
+            }
+        }
+
         for view in &self.swap_chain_image_views {
             unsafe {
                 ffi::vkDestroyImageView(self.device, *view, std::ptr::null());
