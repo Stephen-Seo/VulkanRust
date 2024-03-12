@@ -311,9 +311,7 @@ impl VulkanApp {
 
     fn setup_debug_messenger(&mut self) -> Result<(), String> {
         if !ENABLE_VALIDATION_LAYERS {
-            return Err(String::from(
-                "Cannot setup debug messenger if validation layers is not enabled!",
-            ));
+            return Ok(());
         }
 
         if self.vk_instance.is_null() {
