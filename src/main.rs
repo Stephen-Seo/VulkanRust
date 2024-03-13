@@ -175,6 +175,8 @@ struct VulkanApp {
     pipeline_layout: ffi::VkPipelineLayout,
     graphics_pipeline: ffi::VkPipeline,
     swap_chain_framebuffers: Vec<ffi::VkFramebuffer>,
+    command_pool: ffi::VkCommandPool,
+    command_buffer: ffi::VkCommandBuffer,
 }
 
 impl VulkanApp {
@@ -197,6 +199,8 @@ impl VulkanApp {
             pipeline_layout: std::ptr::null_mut(),
             graphics_pipeline: std::ptr::null_mut(),
             swap_chain_framebuffers: Vec::new(),
+            command_pool: std::ptr::null_mut(),
+            command_buffer: std::ptr::null_mut(),
         }
     }
 
@@ -236,6 +240,8 @@ impl VulkanApp {
         self.create_graphics_pipeline()
             .expect("Should be able to set up graphics pipeline");
         self.create_framebuffers().unwrap();
+        self.create_command_pool().unwrap();
+        self.create_command_buffer().unwrap();
     }
 
     fn create_instance(&mut self) -> Result<(), String> {
@@ -903,13 +909,6 @@ impl VulkanApp {
         input_assembly.topology = ffi::VkPrimitiveTopology_VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         input_assembly.primitiveRestartEnable = ffi::VK_FALSE;
 
-        let viewport = self.create_viewport();
-
-        let mut scissor: ffi::VkRect2D = unsafe { std::mem::zeroed() };
-        scissor.offset.x = 0;
-        scissor.offset.y = 0;
-        scissor.extent = self.swap_chain_extent;
-
         let dynamic_state_info_struct = Self::create_dynamic_state_info_struct();
 
         let viewport_state = Self::create_viewport_state_info_struct();
@@ -1062,7 +1061,7 @@ impl VulkanApp {
         vertex_input_info
     }
 
-    fn create_viewport(&mut self) -> ffi::VkViewport {
+    fn create_viewport(&self) -> ffi::VkViewport {
         let mut viewport: ffi::VkViewport = unsafe { std::mem::zeroed() };
         viewport.x = 0.0;
         viewport.y = 0.0;
@@ -1072,6 +1071,13 @@ impl VulkanApp {
         viewport.maxDepth = 1.0;
 
         viewport
+    }
+
+    fn create_scissor(&self) -> ffi::VkRect2D {
+        ffi::VkRect2D {
+            offset: ffi::VkOffset2D { x: 0, y: 0 },
+            extent: self.swap_chain_extent,
+        }
     }
 
     fn create_viewport_state_info_struct() -> ffi::VkPipelineViewportStateCreateInfo {
@@ -1234,10 +1240,132 @@ impl VulkanApp {
 
         Ok(())
     }
+
+    fn create_command_pool(&mut self) -> Result<(), String> {
+        let indices = self.find_queue_families(self.physical_device);
+
+        let mut pool_info: ffi::VkCommandPoolCreateInfo = unsafe { std::mem::zeroed() };
+        pool_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pool_info.flags =
+            ffi::VkCommandPoolCreateFlagBits_VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        pool_info.queueFamilyIndex = indices
+            .graphics_family
+            .expect("indices should have graphics family idx");
+
+        let result = unsafe {
+            ffi::vkCreateCommandPool(
+                self.device,
+                std::ptr::addr_of!(pool_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(self.command_pool),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            return Err(String::from("Failed to create command pool!"));
+        }
+
+        Ok(())
+    }
+
+    fn create_command_buffer(&mut self) -> Result<(), String> {
+        let mut alloc_info: ffi::VkCommandBufferAllocateInfo = unsafe { std::mem::zeroed() };
+        alloc_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_info.commandPool = self.command_pool;
+        alloc_info.level = ffi::VkCommandBufferLevel_VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc_info.commandBufferCount = 1;
+
+        let result = unsafe {
+            ffi::vkAllocateCommandBuffers(
+                self.device,
+                std::ptr::addr_of!(alloc_info),
+                std::ptr::addr_of_mut!(self.command_buffer),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            return Err(String::from("Failed to allocate command buffers!"));
+        }
+
+        Ok(())
+    }
+
+    fn record_command_buffer(
+        &mut self,
+        command_buffer: ffi::VkCommandBuffer,
+        image_index: usize,
+    ) -> Result<(), String> {
+        let mut begin_info: ffi::VkCommandBufferBeginInfo = unsafe { std::mem::zeroed() };
+        begin_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = 0;
+        begin_info.pInheritanceInfo = std::ptr::null();
+
+        let result =
+            unsafe { ffi::vkBeginCommandBuffer(command_buffer, std::ptr::addr_of!(begin_info)) };
+        if result != ffi::VkResult_VK_SUCCESS {
+            return Err(String::from("Failed to begin recording command buffer!"));
+        }
+
+        let mut render_pass_info: ffi::VkRenderPassBeginInfo = unsafe { std::mem::zeroed() };
+        render_pass_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        render_pass_info.renderPass = self.render_pass;
+        render_pass_info.framebuffer = self.swap_chain_framebuffers[image_index];
+
+        render_pass_info.renderArea.offset.x = 0;
+        render_pass_info.renderArea.offset.y = 0;
+        render_pass_info.renderArea.extent = self.swap_chain_extent;
+
+        let mut clear_color: ffi::VkClearValue = unsafe { std::mem::zeroed() };
+        unsafe {
+            clear_color.color.float32[0] = 0.0;
+            clear_color.color.float32[1] = 0.0;
+            clear_color.color.float32[2] = 0.0;
+            clear_color.color.float32[3] = 1.0;
+        }
+        render_pass_info.clearValueCount = 1;
+        render_pass_info.pClearValues = std::ptr::addr_of!(clear_color);
+
+        unsafe {
+            ffi::vkCmdBeginRenderPass(
+                command_buffer,
+                std::ptr::addr_of!(render_pass_info),
+                ffi::VkSubpassContents_VK_SUBPASS_CONTENTS_INLINE,
+            );
+            ffi::vkCmdBindPipeline(
+                command_buffer,
+                ffi::VkPipelineBindPoint_VK_PIPELINE_BIND_POINT_GRAPHICS,
+                self.graphics_pipeline,
+            );
+        }
+
+        let viewport = self.create_viewport();
+
+        unsafe {
+            ffi::vkCmdSetViewport(command_buffer, 0, 1, std::ptr::addr_of!(viewport));
+        }
+
+        let scissor = self.create_scissor();
+
+        unsafe {
+            ffi::vkCmdSetScissor(command_buffer, 0, 1, std::ptr::addr_of!(scissor));
+            ffi::vkCmdDraw(command_buffer, 3, 1, 0, 0);
+            ffi::vkCmdEndRenderPass(command_buffer);
+
+            if ffi::vkEndCommandBuffer(command_buffer) != ffi::VkResult_VK_SUCCESS {
+                return Err(String::from("Failed to record command buffer!"));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
+        if !self.command_pool.is_null() {
+            unsafe {
+                ffi::vkDestroyCommandPool(self.device, self.command_pool, std::ptr::null());
+            }
+        }
+
         for framebuffer in &self.swap_chain_framebuffers {
             unsafe {
                 ffi::vkDestroyFramebuffer(self.device, *framebuffer, std::ptr::null());
