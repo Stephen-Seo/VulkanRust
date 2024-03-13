@@ -174,6 +174,7 @@ struct VulkanApp {
     render_pass: ffi::VkRenderPass,
     pipeline_layout: ffi::VkPipelineLayout,
     graphics_pipeline: ffi::VkPipeline,
+    swap_chain_framebuffers: Vec<ffi::VkFramebuffer>,
 }
 
 impl VulkanApp {
@@ -195,6 +196,7 @@ impl VulkanApp {
             render_pass: std::ptr::null_mut(),
             pipeline_layout: std::ptr::null_mut(),
             graphics_pipeline: std::ptr::null_mut(),
+            swap_chain_framebuffers: Vec::new(),
         }
     }
 
@@ -233,6 +235,7 @@ impl VulkanApp {
         self.create_render_pass().unwrap();
         self.create_graphics_pipeline()
             .expect("Should be able to set up graphics pipeline");
+        self.create_framebuffers().unwrap();
     }
 
     fn create_instance(&mut self) -> Result<(), String> {
@@ -1200,10 +1203,47 @@ impl VulkanApp {
 
         Ok(())
     }
+
+    fn create_framebuffers(&mut self) -> Result<(), String> {
+        self.swap_chain_framebuffers
+            .resize(self.swap_chain_image_views.len(), std::ptr::null_mut());
+
+        for (idx, image_view) in self.swap_chain_image_views.iter().enumerate() {
+            let mut framebuffer_info: ffi::VkFramebufferCreateInfo = unsafe { std::mem::zeroed() };
+            framebuffer_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            framebuffer_info.renderPass = self.render_pass;
+            framebuffer_info.attachmentCount = 1;
+            framebuffer_info.pAttachments = image_view as *const ffi::VkImageView;
+            framebuffer_info.width = self.swap_chain_extent.width;
+            framebuffer_info.height = self.swap_chain_extent.height;
+            framebuffer_info.layers = 1;
+
+            let result = unsafe {
+                ffi::vkCreateFramebuffer(
+                    self.device,
+                    std::ptr::addr_of!(framebuffer_info),
+                    std::ptr::null(),
+                    std::ptr::addr_of_mut!(self.swap_chain_framebuffers[idx]),
+                )
+            };
+
+            if result != ffi::VkResult_VK_SUCCESS {
+                return Err(String::from("Failed to create framebuffer!"));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
+        for framebuffer in &self.swap_chain_framebuffers {
+            unsafe {
+                ffi::vkDestroyFramebuffer(self.device, *framebuffer, std::ptr::null());
+            }
+        }
+
         if !self.graphics_pipeline.is_null() {
             unsafe {
                 ffi::vkDestroyPipeline(self.device, self.graphics_pipeline, std::ptr::null());
