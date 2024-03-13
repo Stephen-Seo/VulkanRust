@@ -415,7 +415,7 @@ impl VulkanApp {
             dev_queue_create_infos.push(dev_queue_create_info);
         }
 
-        let mut phys_dev_feat: ffi::VkPhysicalDeviceFeatures = unsafe { std::mem::zeroed() };
+        let phys_dev_feat: ffi::VkPhysicalDeviceFeatures = unsafe { std::mem::zeroed() };
 
         let mut dev_create_info: ffi::VkDeviceCreateInfo = unsafe { std::mem::zeroed() };
         dev_create_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
