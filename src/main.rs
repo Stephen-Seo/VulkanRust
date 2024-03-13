@@ -171,6 +171,7 @@ struct VulkanApp {
     swap_chain_image_format: ffi::VkFormat,
     swap_chain_extent: ffi::VkExtent2D,
     swap_chain_image_views: Vec<ffi::VkImageView>,
+    render_pass: ffi::VkRenderPass,
     pipeline_layout: ffi::VkPipelineLayout,
 }
 
@@ -190,6 +191,7 @@ impl VulkanApp {
             swap_chain_image_format: 0,
             swap_chain_extent: unsafe { std::mem::zeroed() },
             swap_chain_image_views: Vec::new(),
+            render_pass: std::ptr::null_mut(),
             pipeline_layout: std::ptr::null_mut(),
         }
     }
@@ -226,6 +228,7 @@ impl VulkanApp {
         self.create_logical_device().unwrap();
         self.create_swap_chain().unwrap();
         self.create_image_views().unwrap();
+        self.create_render_pass().unwrap();
         self.create_graphics_pipeline()
             .expect("Should be able to set up graphics pipeline");
     }
@@ -1112,6 +1115,53 @@ impl VulkanApp {
 
         color_blending
     }
+
+    fn create_render_pass(&mut self) -> Result<(), String> {
+        let mut color_attachment: ffi::VkAttachmentDescription = unsafe { std::mem::zeroed() };
+        color_attachment.format = self.swap_chain_image_format;
+        color_attachment.samples = ffi::VkSampleCountFlagBits_VK_SAMPLE_COUNT_1_BIT;
+
+        color_attachment.loadOp = ffi::VkAttachmentLoadOp_VK_ATTACHMENT_LOAD_OP_CLEAR;
+        color_attachment.storeOp = ffi::VkAttachmentStoreOp_VK_ATTACHMENT_STORE_OP_STORE;
+
+        color_attachment.stencilLoadOp = ffi::VkAttachmentLoadOp_VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        color_attachment.stencilStoreOp = ffi::VkAttachmentStoreOp_VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+        color_attachment.initialLayout = ffi::VkImageLayout_VK_IMAGE_LAYOUT_UNDEFINED;
+        color_attachment.finalLayout = ffi::VkImageLayout_VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        let mut color_attachment_ref: ffi::VkAttachmentReference = unsafe { std::mem::zeroed() };
+        color_attachment_ref.attachment = 0;
+        color_attachment_ref.layout = ffi::VkImageLayout_VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        let mut subpass: ffi::VkSubpassDescription = unsafe { std::mem::zeroed() };
+        subpass.pipelineBindPoint = ffi::VkPipelineBindPoint_VK_PIPELINE_BIND_POINT_GRAPHICS;
+
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = std::ptr::addr_of!(color_attachment_ref);
+
+        let mut render_pass_info: ffi::VkRenderPassCreateInfo = unsafe { std::mem::zeroed() };
+        render_pass_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        render_pass_info.attachmentCount = 1;
+        render_pass_info.pAttachments = std::ptr::addr_of!(color_attachment);
+        render_pass_info.subpassCount = 1;
+        render_pass_info.pSubpasses = std::ptr::addr_of!(subpass);
+
+        let result = unsafe {
+            ffi::vkCreateRenderPass(
+                self.device,
+                std::ptr::addr_of!(render_pass_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(self.render_pass),
+            )
+        };
+
+        if result != ffi::VkResult_VK_SUCCESS {
+            return Err(String::from("Failed to create render pass!"));
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for VulkanApp {
@@ -1119,6 +1169,12 @@ impl Drop for VulkanApp {
         if !self.pipeline_layout.is_null() {
             unsafe {
                 ffi::vkDestroyPipelineLayout(self.device, self.pipeline_layout, std::ptr::null());
+            }
+        }
+
+        if !self.render_pass.is_null() {
+            unsafe {
+                ffi::vkDestroyRenderPass(self.device, self.render_pass, std::ptr::null());
             }
         }
 
