@@ -177,6 +177,9 @@ struct VulkanApp {
     swap_chain_framebuffers: Vec<ffi::VkFramebuffer>,
     command_pool: ffi::VkCommandPool,
     command_buffer: ffi::VkCommandBuffer,
+    image_available_semaphore: ffi::VkSemaphore,
+    render_finished_semaphore: ffi::VkSemaphore,
+    in_flight_fence: ffi::VkFence,
 }
 
 impl VulkanApp {
@@ -201,6 +204,9 @@ impl VulkanApp {
             swap_chain_framebuffers: Vec::new(),
             command_pool: std::ptr::null_mut(),
             command_buffer: std::ptr::null_mut(),
+            image_available_semaphore: std::ptr::null_mut(),
+            render_finished_semaphore: std::ptr::null_mut(),
+            in_flight_fence: std::ptr::null_mut(),
         }
     }
 
@@ -242,6 +248,7 @@ impl VulkanApp {
         self.create_framebuffers().unwrap();
         self.create_command_pool().unwrap();
         self.create_command_buffer().unwrap();
+        self.create_sync_objects().unwrap();
     }
 
     fn create_instance(&mut self) -> Result<(), String> {
@@ -488,13 +495,18 @@ impl VulkanApp {
             panic!("ERROR: Cannot execute main loop if vk_instance is null!");
         }
 
-        loop {
+        'outer: loop {
             unsafe {
                 if ffi::glfwWindowShouldClose(self.window) != 0 {
-                    return;
+                    break 'outer;
                 }
                 ffi::glfwPollEvents();
+                self.draw_frame().unwrap();
             }
+        }
+
+        unsafe {
+            ffi::vkDeviceWaitIdle(self.device);
         }
     }
 
@@ -1194,6 +1206,21 @@ impl VulkanApp {
         render_pass_info.subpassCount = 1;
         render_pass_info.pSubpasses = std::ptr::addr_of!(subpass);
 
+        let mut dependency: ffi::VkSubpassDependency = unsafe { std::mem::zeroed() };
+        dependency.srcSubpass = ffi::VK_SUBPASS_EXTERNAL as u32;
+        dependency.dstSubpass = 0;
+
+        dependency.srcStageMask =
+            ffi::VkPipelineStageFlagBits_VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcAccessMask = 0;
+
+        dependency.dstStageMask =
+            ffi::VkPipelineStageFlagBits_VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.dstAccessMask = ffi::VkAccessFlagBits_VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+        render_pass_info.dependencyCount = 1;
+        render_pass_info.pDependencies = std::ptr::addr_of!(dependency);
+
         let result = unsafe {
             ffi::vkCreateRenderPass(
                 self.device,
@@ -1356,10 +1383,145 @@ impl VulkanApp {
 
         Ok(())
     }
+
+    fn draw_frame(&mut self) -> Result<(), String> {
+        unsafe {
+            ffi::vkWaitForFences(
+                self.device,
+                1,
+                std::ptr::addr_of!(self.in_flight_fence),
+                ffi::VK_TRUE,
+                u64::MAX,
+            );
+            ffi::vkResetFences(self.device, 1, std::ptr::addr_of!(self.in_flight_fence));
+        }
+
+        let mut image_index: u32 = 0;
+
+        unsafe {
+            ffi::vkAcquireNextImageKHR(
+                self.device,
+                self.swap_chain,
+                u64::MAX,
+                self.image_available_semaphore,
+                std::ptr::null_mut(),
+                std::ptr::addr_of_mut!(image_index),
+            );
+            ffi::vkResetCommandBuffer(self.command_buffer, 0);
+            self.record_command_buffer(self.command_buffer, image_index as usize)?;
+        }
+
+        let mut submit_info: ffi::VkSubmitInfo = unsafe { std::mem::zeroed() };
+        submit_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+        let wait_stages: ffi::VkPipelineStageFlags =
+            ffi::VkPipelineStageFlagBits_VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        submit_info.waitSemaphoreCount = 1;
+        submit_info.pWaitSemaphores = std::ptr::addr_of!(self.image_available_semaphore);
+        submit_info.pWaitDstStageMask = std::ptr::addr_of!(wait_stages);
+
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers = std::ptr::addr_of!(self.command_buffer);
+
+        submit_info.signalSemaphoreCount = 1;
+        submit_info.pSignalSemaphores = std::ptr::addr_of!(self.render_finished_semaphore);
+
+        let result = unsafe {
+            ffi::vkQueueSubmit(
+                self.graphics_queue,
+                1,
+                std::ptr::addr_of!(submit_info),
+                self.in_flight_fence,
+            )
+        };
+
+        if result != ffi::VkResult_VK_SUCCESS {
+            return Err(String::from("Failed to submit draw command buffer!"));
+        }
+
+        let mut present_info: ffi::VkPresentInfoKHR = unsafe { std::mem::zeroed() };
+        present_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+        present_info.waitSemaphoreCount = 1;
+        present_info.pWaitSemaphores = std::ptr::addr_of!(self.render_finished_semaphore);
+
+        present_info.swapchainCount = 1;
+        present_info.pSwapchains = std::ptr::addr_of!(self.swap_chain);
+        present_info.pImageIndices = std::ptr::addr_of!(image_index);
+
+        present_info.pResults = std::ptr::null_mut();
+
+        unsafe {
+            ffi::vkQueuePresentKHR(self.present_queue, std::ptr::addr_of!(present_info));
+        }
+
+        Ok(())
+    }
+
+    fn create_sync_objects(&mut self) -> Result<(), String> {
+        let mut semaphore_info: ffi::VkSemaphoreCreateInfo = unsafe { std::mem::zeroed() };
+        semaphore_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        let mut fence_info: ffi::VkFenceCreateInfo = unsafe { std::mem::zeroed() };
+        fence_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fence_info.flags = ffi::VkFenceCreateFlagBits_VK_FENCE_CREATE_SIGNALED_BIT;
+
+        unsafe {
+            if ffi::vkCreateSemaphore(
+                self.device,
+                std::ptr::addr_of!(semaphore_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(self.image_available_semaphore),
+            ) != ffi::VkResult_VK_SUCCESS
+                || ffi::vkCreateSemaphore(
+                    self.device,
+                    std::ptr::addr_of!(semaphore_info),
+                    std::ptr::null(),
+                    std::ptr::addr_of_mut!(self.render_finished_semaphore),
+                ) != ffi::VkResult_VK_SUCCESS
+                || ffi::vkCreateFence(
+                    self.device,
+                    std::ptr::addr_of!(fence_info),
+                    std::ptr::null(),
+                    std::ptr::addr_of_mut!(self.in_flight_fence),
+                ) != ffi::VkResult_VK_SUCCESS
+            {
+                return Err(String::from("Failed to create semaphores/fence!"));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
+        if !self.in_flight_fence.is_null() {
+            unsafe {
+                ffi::vkDestroyFence(self.device, self.in_flight_fence, std::ptr::null());
+            }
+        }
+
+        if !self.render_finished_semaphore.is_null() {
+            unsafe {
+                ffi::vkDestroySemaphore(
+                    self.device,
+                    self.render_finished_semaphore,
+                    std::ptr::null(),
+                );
+            }
+        }
+
+        if !self.image_available_semaphore.is_null() {
+            unsafe {
+                ffi::vkDestroySemaphore(
+                    self.device,
+                    self.image_available_semaphore,
+                    std::ptr::null(),
+                );
+            }
+        }
+
         if !self.command_pool.is_null() {
             unsafe {
                 ffi::vkDestroyCommandPool(self.device, self.command_pool, std::ptr::null());
