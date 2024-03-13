@@ -280,8 +280,8 @@ impl VulkanApp {
         if ENABLE_VALIDATION_LAYERS {
             let exts_slice: &[*const std::ffi::c_char] =
                 unsafe { std::slice::from_raw_parts(exts, ext_count as usize) };
-            for i in 0..(ext_count as usize) {
-                exts_with_validation.push(exts_slice[i]);
+            for ext in exts_slice {
+                exts_with_validation.push(*ext);
             }
             exts_with_validation.push(validation_string);
         }
@@ -501,8 +501,8 @@ impl VulkanApp {
                     break 'outer;
                 }
                 ffi::glfwPollEvents();
-                self.draw_frame().unwrap();
             }
+            self.draw_frame().unwrap();
         }
 
         unsafe {
@@ -699,7 +699,7 @@ impl VulkanApp {
 
     fn choose_swap_surface_format(
         &self,
-        available_formats: &Vec<ffi::VkSurfaceFormatKHR>,
+        available_formats: &[ffi::VkSurfaceFormatKHR],
     ) -> Option<usize> {
         if available_formats.is_empty() {
             return None;
