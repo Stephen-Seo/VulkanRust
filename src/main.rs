@@ -173,6 +173,7 @@ struct VulkanApp {
     swap_chain_image_views: Vec<ffi::VkImageView>,
     render_pass: ffi::VkRenderPass,
     pipeline_layout: ffi::VkPipelineLayout,
+    graphics_pipeline: ffi::VkPipeline,
 }
 
 impl VulkanApp {
@@ -193,6 +194,7 @@ impl VulkanApp {
             swap_chain_image_views: Vec::new(),
             render_pass: std::ptr::null_mut(),
             pipeline_layout: std::ptr::null_mut(),
+            graphics_pipeline: std::ptr::null_mut(),
         }
     }
 
@@ -939,6 +941,42 @@ impl VulkanApp {
             return Err(String::from("Failed to create pipeline layout!"));
         }
 
+        let mut pipeline_info: ffi::VkGraphicsPipelineCreateInfo = unsafe { std::mem::zeroed() };
+        pipeline_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipeline_info.stageCount = 2;
+        pipeline_info.pStages = shader_stages.as_ptr();
+
+        pipeline_info.pVertexInputState = std::ptr::addr_of!(vertex_input_info);
+        pipeline_info.pInputAssemblyState = std::ptr::addr_of!(input_assembly);
+        pipeline_info.pViewportState = std::ptr::addr_of!(viewport_state);
+        pipeline_info.pRasterizationState = std::ptr::addr_of!(rasterizer_info);
+        pipeline_info.pMultisampleState = std::ptr::addr_of!(multisampling_info);
+        pipeline_info.pDepthStencilState = std::ptr::null();
+        pipeline_info.pColorBlendState = std::ptr::addr_of!(color_blend_info_struct);
+        pipeline_info.pDynamicState = std::ptr::addr_of!(dynamic_state_info_struct);
+
+        pipeline_info.layout = self.pipeline_layout;
+
+        pipeline_info.renderPass = self.render_pass;
+        pipeline_info.subpass = 0;
+
+        pipeline_info.basePipelineHandle = std::ptr::null_mut();
+        pipeline_info.basePipelineIndex = -1;
+
+        let result = unsafe {
+            ffi::vkCreateGraphicsPipelines(
+                self.device,
+                std::ptr::null_mut(),
+                1,
+                std::ptr::addr_of!(pipeline_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(self.graphics_pipeline),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            return Err(String::from("Failed to create a graphics pipeline!"));
+        }
+
         // TODO: Use the *_shader_stage_info structs before vert/frag_shader_module is cleaned up.
         Ok(())
     }
@@ -1166,6 +1204,12 @@ impl VulkanApp {
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
+        if !self.graphics_pipeline.is_null() {
+            unsafe {
+                ffi::vkDestroyPipeline(self.device, self.graphics_pipeline, std::ptr::null());
+            }
+        }
+
         if !self.pipeline_layout.is_null() {
             unsafe {
                 ffi::vkDestroyPipelineLayout(self.device, self.pipeline_layout, std::ptr::null());
