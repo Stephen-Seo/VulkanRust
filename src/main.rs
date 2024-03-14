@@ -1529,6 +1529,19 @@ impl VulkanApp {
     }
 
     fn recreate_swap_chain(&mut self) -> Result<(), String> {
+        let mut width: i32 = 0;
+        let mut height: i32 = 0;
+        while width == 0 || height == 0 {
+            unsafe {
+                ffi::glfwGetFramebufferSize(
+                    self.window,
+                    std::ptr::addr_of_mut!(width),
+                    std::ptr::addr_of_mut!(height),
+                );
+                ffi::glfwWaitEvents();
+            }
+        }
+
         unsafe {
             ffi::vkDeviceWaitIdle(self.device);
         }
