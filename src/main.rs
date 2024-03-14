@@ -1,7 +1,7 @@
 mod ffi;
 
 use std::collections::HashSet;
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr, CString};
 
 const WINDOW_WIDTH: i32 = 800;
 const WINDOW_HEIGHT: i32 = 600;
@@ -75,6 +75,13 @@ extern "C" fn validation_debug_callback(
     );
 
     ffi::VK_FALSE
+}
+
+extern "C" fn framebuffer_resize_callback(window: *mut ffi::GLFWwindow, _width: i32, _height: i32) {
+    unsafe {
+        let app: *mut VulkanApp = ffi::glfwGetWindowUserPointer(window) as *mut VulkanApp;
+        (*app).set_resize_flag();
+    }
 }
 
 fn create_debug_utils_messenger_ext(
@@ -180,6 +187,7 @@ struct VulkanApp {
     image_available_semaphore: ffi::VkSemaphore,
     render_finished_semaphore: ffi::VkSemaphore,
     in_flight_fence: ffi::VkFence,
+    framebuffer_resized: bool,
 }
 
 impl VulkanApp {
@@ -207,6 +215,7 @@ impl VulkanApp {
             image_available_semaphore: std::ptr::null_mut(),
             render_finished_semaphore: std::ptr::null_mut(),
             in_flight_fence: std::ptr::null_mut(),
+            framebuffer_resized: false,
         }
     }
 
@@ -215,7 +224,7 @@ impl VulkanApp {
         unsafe {
             ffi::glfwInit();
             ffi::glfwWindowHint(ffi::GLFW_CLIENT_API as i32, ffi::GLFW_NO_API as i32);
-            ffi::glfwWindowHint(ffi::GLFW_RESIZABLE as i32, ffi::GLFW_FALSE as i32);
+            ffi::glfwWindowHint(ffi::GLFW_RESIZABLE as i32, ffi::GLFW_TRUE as i32);
             self.window = ffi::glfwCreateWindow(
                 WINDOW_WIDTH,
                 WINDOW_HEIGHT,
@@ -226,6 +235,9 @@ impl VulkanApp {
             if self.window.is_null() {
                 panic!("ERROR: Failed to create glfw window!");
             }
+
+            ffi::glfwSetWindowUserPointer(self.window, self as *mut Self as *mut c_void);
+            ffi::glfwSetFramebufferSizeCallback(self.window, Some(framebuffer_resize_callback));
         }
     }
 
@@ -1395,13 +1407,12 @@ impl VulkanApp {
                 ffi::VK_TRUE,
                 u64::MAX,
             );
-            ffi::vkResetFences(self.device, 1, std::ptr::addr_of!(self.in_flight_fence));
         }
 
         let mut image_index: u32 = 0;
 
         unsafe {
-            ffi::vkAcquireNextImageKHR(
+            let result = ffi::vkAcquireNextImageKHR(
                 self.device,
                 self.swap_chain,
                 u64::MAX,
@@ -1409,6 +1420,18 @@ impl VulkanApp {
                 std::ptr::null_mut(),
                 std::ptr::addr_of_mut!(image_index),
             );
+            if result == ffi::VkResult_VK_ERROR_OUT_OF_DATE_KHR {
+                // Recreate swapchain.
+                self.recreate_swap_chain()?;
+                return Ok(());
+            } else if result != ffi::VkResult_VK_SUCCESS
+                && result != ffi::VkResult_VK_SUBOPTIMAL_KHR
+            {
+                return Err(String::from("Failed to acquire swap chain image!"));
+            }
+
+            ffi::vkResetFences(self.device, 1, std::ptr::addr_of!(self.in_flight_fence));
+
             ffi::vkResetCommandBuffer(self.command_buffer, 0);
             self.record_command_buffer(self.command_buffer, image_index as usize)?;
         }
@@ -1454,7 +1477,17 @@ impl VulkanApp {
         present_info.pResults = std::ptr::null_mut();
 
         unsafe {
-            ffi::vkQueuePresentKHR(self.present_queue, std::ptr::addr_of!(present_info));
+            let result =
+                ffi::vkQueuePresentKHR(self.present_queue, std::ptr::addr_of!(present_info));
+            if result == ffi::VkResult_VK_ERROR_OUT_OF_DATE_KHR
+                || result == ffi::VkResult_VK_SUBOPTIMAL_KHR
+                || self.framebuffer_resized
+            {
+                self.framebuffer_resized = false;
+                self.recreate_swap_chain()?;
+            } else if result != ffi::VkResult_VK_SUCCESS {
+                return Err(String::from("Failed to present swap chain image!"));
+            }
         }
 
         Ok(())
@@ -1494,10 +1527,55 @@ impl VulkanApp {
 
         Ok(())
     }
+
+    fn recreate_swap_chain(&mut self) -> Result<(), String> {
+        unsafe {
+            ffi::vkDeviceWaitIdle(self.device);
+        }
+
+        self.cleanup_swap_chain()?;
+
+        self.create_swap_chain()?;
+        self.create_image_views()?;
+        self.create_framebuffers()?;
+
+        Ok(())
+    }
+
+    fn cleanup_swap_chain(&mut self) -> Result<(), String> {
+        for framebuffer in &self.swap_chain_framebuffers {
+            unsafe {
+                ffi::vkDestroyFramebuffer(self.device, *framebuffer, std::ptr::null());
+            }
+        }
+        self.swap_chain_framebuffers.clear();
+
+        for view in &self.swap_chain_image_views {
+            unsafe {
+                ffi::vkDestroyImageView(self.device, *view, std::ptr::null());
+            }
+        }
+        self.swap_chain_image_views.clear();
+
+        if !self.swap_chain.is_null() {
+            unsafe {
+                ffi::vkDestroySwapchainKHR(self.device, self.swap_chain, std::ptr::null());
+            }
+        }
+        self.swap_chain = std::ptr::null_mut();
+
+        Ok(())
+    }
+
+    pub fn set_resize_flag(&mut self) {
+        self.framebuffer_resized = true;
+    }
 }
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
+        self.cleanup_swap_chain().unwrap();
+
         if !self.in_flight_fence.is_null() {
             unsafe {
                 ffi::vkDestroyFence(self.device, self.in_flight_fence, std::ptr::null());
@@ -1530,12 +1608,6 @@ impl Drop for VulkanApp {
             }
         }
 
-        for framebuffer in &self.swap_chain_framebuffers {
-            unsafe {
-                ffi::vkDestroyFramebuffer(self.device, *framebuffer, std::ptr::null());
-            }
-        }
-
         if !self.graphics_pipeline.is_null() {
             unsafe {
                 ffi::vkDestroyPipeline(self.device, self.graphics_pipeline, std::ptr::null());
@@ -1551,18 +1623,6 @@ impl Drop for VulkanApp {
         if !self.render_pass.is_null() {
             unsafe {
                 ffi::vkDestroyRenderPass(self.device, self.render_pass, std::ptr::null());
-            }
-        }
-
-        for view in &self.swap_chain_image_views {
-            unsafe {
-                ffi::vkDestroyImageView(self.device, *view, std::ptr::null());
-            }
-        }
-
-        if !self.swap_chain.is_null() {
-            unsafe {
-                ffi::vkDestroySwapchainKHR(self.device, self.swap_chain, std::ptr::null());
             }
         }
 
