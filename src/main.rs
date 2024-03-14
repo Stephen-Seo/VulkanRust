@@ -718,7 +718,7 @@ impl VulkanApp {
 
     fn choose_swap_present_mode(
         &self,
-        _available_present_modes: &Vec<ffi::VkPresentModeKHR>,
+        _available_present_modes: &[ffi::VkPresentModeKHR],
     ) -> ffi::VkPresentModeKHR {
         // Default to FIFO, don't check for MAILBOX.
 
