@@ -718,13 +718,15 @@ impl VulkanApp {
 
     fn choose_swap_present_mode(
         &self,
-        available_present_modes: &Vec<ffi::VkPresentModeKHR>,
+        _available_present_modes: &Vec<ffi::VkPresentModeKHR>,
     ) -> ffi::VkPresentModeKHR {
-        for mode in available_present_modes {
-            if *mode == ffi::VkPresentModeKHR_VK_PRESENT_MODE_MAILBOX_KHR {
-                return ffi::VkPresentModeKHR_VK_PRESENT_MODE_MAILBOX_KHR;
-            }
-        }
+        // Default to FIFO, don't check for MAILBOX.
+
+        //for mode in available_present_modes {
+        //    if *mode == ffi::VkPresentModeKHR_VK_PRESENT_MODE_MAILBOX_KHR {
+        //        return ffi::VkPresentModeKHR_VK_PRESENT_MODE_MAILBOX_KHR;
+        //    }
+        //}
 
         ffi::VkPresentModeKHR_VK_PRESENT_MODE_FIFO_KHR
     }
