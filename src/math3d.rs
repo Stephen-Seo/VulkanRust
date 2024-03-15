@@ -16,6 +16,7 @@ impl Default for Vertex {
     }
 }
 
+#[allow(dead_code)]
 impl Vertex {
     pub fn new(pos: [f32; 2], color: [f32; 3]) -> Self {
         Self { pos, color }
