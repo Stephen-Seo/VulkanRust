@@ -1,7 +1,10 @@
 mod ffi;
+mod math3d;
 
 use std::collections::HashSet;
 use std::ffi::{c_void, CStr, CString};
+
+use math3d::Vertex;
 
 const WINDOW_WIDTH: i32 = 800;
 const WINDOW_HEIGHT: i32 = 600;
@@ -926,7 +929,19 @@ impl VulkanApp {
         let shader_stages: [ffi::VkPipelineShaderStageCreateInfo; 2] =
             [vert_shader_stage_info, frag_shader_stage_info];
 
-        let vertex_input_info = Self::create_vertex_input_state_info_struct();
+        let mut vertex_input_info: ffi::VkPipelineVertexInputStateCreateInfo =
+            unsafe { std::mem::zeroed() };
+        vertex_input_info.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+        let bind_desc = Vertex::get_binding_description();
+        let attr_descs = Vertex::get_attribute_descriptions();
+
+        vertex_input_info.vertexBindingDescriptionCount = 1;
+        vertex_input_info.vertexAttributeDescriptionCount = attr_descs.len() as u32;
+
+        vertex_input_info.pVertexBindingDescriptions = std::ptr::addr_of!(bind_desc);
+        vertex_input_info.pVertexAttributeDescriptions = attr_descs.as_ptr();
 
         let mut input_assembly: ffi::VkPipelineInputAssemblyStateCreateInfo =
             unsafe { std::mem::zeroed() };
@@ -1072,19 +1087,6 @@ impl VulkanApp {
         dynamic_state.pDynamicStates = DYNAMIC_STATES.as_ptr();
 
         dynamic_state
-    }
-
-    fn create_vertex_input_state_info_struct() -> ffi::VkPipelineVertexInputStateCreateInfo {
-        let mut vertex_input_info: ffi::VkPipelineVertexInputStateCreateInfo =
-            unsafe { std::mem::zeroed() };
-        vertex_input_info.sType =
-            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertex_input_info.vertexBindingDescriptionCount = 0;
-        vertex_input_info.pVertexBindingDescriptions = std::ptr::null();
-        vertex_input_info.vertexAttributeDescriptionCount = 0;
-        vertex_input_info.pVertexBindingDescriptions = std::ptr::null();
-
-        vertex_input_info
     }
 
     fn create_viewport(&self) -> ffi::VkViewport {
