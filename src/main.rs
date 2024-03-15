@@ -25,16 +25,16 @@ const DYNAMIC_STATES: [ffi::VkDynamicState; 2] = [
 const DEVICE_EXTENSIONS: [*const i8; 1] =
     [ffi::VK_KHR_SWAPCHAIN_EXTENSION_NAME as *const u8 as *const i8];
 
-const VERTICES: [math3d::Vertex; 3] = [
-    math3d::Vertex {
+const VERTICES: [Vertex; 3] = [
+    Vertex {
         pos: [0.0, -0.5],
         color: [1.0, 0.0, 0.0],
     },
-    math3d::Vertex {
+    Vertex {
         pos: [0.5, 0.5],
         color: [0.0, 1.0, 0.0],
     },
-    math3d::Vertex {
+    Vertex {
         pos: [-0.5, 0.5],
         color: [0.0, 0.0, 1.0],
     },
@@ -1621,7 +1621,7 @@ impl VulkanApp {
         let mut buffer_info: ffi::VkBufferCreateInfo = unsafe { std::mem::zeroed() };
 
         buffer_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        buffer_info.size = (std::mem::size_of::<math3d::Vertex>() * VERTICES.len()) as u64;
+        buffer_info.size = (std::mem::size_of::<Vertex>() * VERTICES.len()) as u64;
         buffer_info.usage = ffi::VkBufferUsageFlagBits_VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
         buffer_info.sharingMode = ffi::VkSharingMode_VK_SHARING_MODE_EXCLUSIVE;
 
@@ -1689,8 +1689,7 @@ impl VulkanApp {
         }
 
         {
-            let data_ptr_vertices: &mut [math3d::Vertex; 3] =
-                unsafe { std::mem::transmute(data_ptr) };
+            let data_ptr_vertices: &mut [Vertex; 3] = unsafe { std::mem::transmute(data_ptr) };
             *data_ptr_vertices = VERTICES;
         }
 
