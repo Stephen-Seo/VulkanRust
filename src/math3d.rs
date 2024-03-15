@@ -22,11 +22,11 @@ impl Vertex {
         Self { pos, color }
     }
 
-    pub fn pos_offset() -> usize {
+    pub const fn pos_offset() -> usize {
         0
     }
 
-    pub fn color_offset() -> usize {
+    pub const fn color_offset() -> usize {
         let mut offset = std::mem::size_of::<[f32; 2]>();
         let alignment = std::mem::align_of::<[f32; 3]>();
         while offset % alignment != 0 {
@@ -36,7 +36,7 @@ impl Vertex {
         offset
     }
 
-    pub fn get_binding_description() -> ffi::VkVertexInputBindingDescription {
+    pub const fn get_binding_description() -> ffi::VkVertexInputBindingDescription {
         let mut bind_desc: ffi::VkVertexInputBindingDescription = unsafe { std::mem::zeroed() };
 
         bind_desc.binding = 0;
@@ -46,7 +46,7 @@ impl Vertex {
         bind_desc
     }
 
-    pub fn get_attribute_descriptions() -> [ffi::VkVertexInputAttributeDescription; 2] {
+    pub const fn get_attribute_descriptions() -> [ffi::VkVertexInputAttributeDescription; 2] {
         let mut attr_descs: [ffi::VkVertexInputAttributeDescription; 2] =
             unsafe { std::mem::zeroed() };
 
