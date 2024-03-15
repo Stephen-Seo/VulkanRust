@@ -3,8 +3,8 @@ use crate::ffi;
 #[repr(C)]
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Vertex {
-    pos: [f32; 2],
-    color: [f32; 3],
+    pub pos: [f32; 2],
+    pub color: [f32; 3],
 }
 
 impl Default for Vertex {
@@ -17,6 +17,10 @@ impl Default for Vertex {
 }
 
 impl Vertex {
+    pub fn new(pos: [f32; 2], color: [f32; 3]) -> Self {
+        Self { pos, color }
+    }
+
     pub fn pos_offset() -> usize {
         0
     }

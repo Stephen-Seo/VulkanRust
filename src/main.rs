@@ -25,6 +25,21 @@ const DYNAMIC_STATES: [ffi::VkDynamicState; 2] = [
 const DEVICE_EXTENSIONS: [*const i8; 1] =
     [ffi::VK_KHR_SWAPCHAIN_EXTENSION_NAME as *const u8 as *const i8];
 
+const VERTICES: [math3d::Vertex; 3] = [
+    math3d::Vertex {
+        pos: [0.0, -0.5],
+        color: [1.0, 0.0, 0.0],
+    },
+    math3d::Vertex {
+        pos: [0.5, 0.5],
+        color: [0.0, 1.0, 0.0],
+    },
+    math3d::Vertex {
+        pos: [-0.5, 0.5],
+        color: [0.0, 0.0, 1.0],
+    },
+];
+
 fn check_validation_layer_support() -> bool {
     let mut layer_count: u32 = 0;
     unsafe {
@@ -191,6 +206,8 @@ struct VulkanApp {
     render_finished_semaphore: ffi::VkSemaphore,
     in_flight_fence: ffi::VkFence,
     framebuffer_resized: bool,
+    vertex_buffer: ffi::VkBuffer,
+    vertex_buffer_memory: ffi::VkDeviceMemory,
 }
 
 impl VulkanApp {
@@ -219,6 +236,8 @@ impl VulkanApp {
             render_finished_semaphore: std::ptr::null_mut(),
             in_flight_fence: std::ptr::null_mut(),
             framebuffer_resized: false,
+            vertex_buffer: std::ptr::null_mut(),
+            vertex_buffer_memory: std::ptr::null_mut(),
         }
     }
 
@@ -262,6 +281,7 @@ impl VulkanApp {
             .expect("Should be able to set up graphics pipeline");
         self.create_framebuffers().unwrap();
         self.create_command_pool().unwrap();
+        self.create_vertex_buffer().unwrap();
         self.create_command_buffer().unwrap();
         self.create_sync_objects().unwrap();
     }
@@ -1379,6 +1399,17 @@ impl VulkanApp {
             );
         }
 
+        let offsets: [ffi::VkDeviceSize; 1] = [0];
+        unsafe {
+            ffi::vkCmdBindVertexBuffers(
+                command_buffer,
+                0,
+                1,
+                std::ptr::addr_of!(self.vertex_buffer),
+                offsets.as_ptr(),
+            );
+        }
+
         let viewport = self.create_viewport();
 
         unsafe {
@@ -1389,7 +1420,7 @@ impl VulkanApp {
 
         unsafe {
             ffi::vkCmdSetScissor(command_buffer, 0, 1, std::ptr::addr_of!(scissor));
-            ffi::vkCmdDraw(command_buffer, 3, 1, 0, 0);
+            ffi::vkCmdDraw(command_buffer, VERTICES.len() as u32, 1, 0, 0);
             ffi::vkCmdEndRenderPass(command_buffer);
 
             if ffi::vkEndCommandBuffer(command_buffer) != ffi::VkResult_VK_SUCCESS {
@@ -1585,11 +1616,137 @@ impl VulkanApp {
     pub fn set_resize_flag(&mut self) {
         self.framebuffer_resized = true;
     }
+
+    fn create_vertex_buffer(&mut self) -> Result<(), String> {
+        let mut buffer_info: ffi::VkBufferCreateInfo = unsafe { std::mem::zeroed() };
+
+        buffer_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buffer_info.size = (std::mem::size_of::<math3d::Vertex>() * VERTICES.len()) as u64;
+        buffer_info.usage = ffi::VkBufferUsageFlagBits_VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        buffer_info.sharingMode = ffi::VkSharingMode_VK_SHARING_MODE_EXCLUSIVE;
+
+        let result = unsafe {
+            ffi::vkCreateBuffer(
+                self.device,
+                std::ptr::addr_of!(buffer_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(self.vertex_buffer),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            return Err(String::from("Failed to create vertex buffer!"));
+        }
+
+        let mut mem_reqs: ffi::VkMemoryRequirements = unsafe { std::mem::zeroed() };
+        unsafe {
+            ffi::vkGetBufferMemoryRequirements(
+                self.device,
+                self.vertex_buffer,
+                std::ptr::addr_of_mut!(mem_reqs),
+            );
+        }
+
+        let mut alloc_info: ffi::VkMemoryAllocateInfo = unsafe { std::mem::zeroed() };
+        alloc_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc_info.allocationSize = mem_reqs.size;
+        alloc_info.memoryTypeIndex = self.find_memory_type(
+            mem_reqs.memoryTypeBits,
+            ffi::VkMemoryPropertyFlagBits_VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                | ffi::VkMemoryPropertyFlagBits_VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        )?;
+
+        let result = unsafe {
+            ffi::vkAllocateMemory(
+                self.device,
+                std::ptr::addr_of!(alloc_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(self.vertex_buffer_memory),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            return Err(String::from("Failed to allocate vertex buffer memory!"));
+        }
+
+        unsafe {
+            ffi::vkBindBufferMemory(
+                self.device,
+                self.vertex_buffer,
+                self.vertex_buffer_memory,
+                0,
+            );
+        }
+
+        let mut data_ptr: *mut c_void = unsafe { std::mem::zeroed() };
+        unsafe {
+            ffi::vkMapMemory(
+                self.device,
+                self.vertex_buffer_memory,
+                0,
+                buffer_info.size,
+                0,
+                std::ptr::addr_of_mut!(data_ptr),
+            );
+        }
+
+        {
+            let data_ptr_vertices: &mut [math3d::Vertex; 3] =
+                unsafe { std::mem::transmute(data_ptr) };
+            *data_ptr_vertices = VERTICES;
+        }
+
+        unsafe {
+            ffi::vkUnmapMemory(self.device, self.vertex_buffer_memory);
+        }
+
+        Ok(())
+    }
+
+    fn find_memory_type(
+        &mut self,
+        type_filter: u32,
+        properties: ffi::VkMemoryPropertyFlags,
+    ) -> Result<u32, String> {
+        if self.physical_device.is_null() {
+            return Err(String::from(
+                "Cannot find memory type if physical_device is null!",
+            ));
+        }
+
+        let mut mem_props: ffi::VkPhysicalDeviceMemoryProperties = unsafe { std::mem::zeroed() };
+        unsafe {
+            ffi::vkGetPhysicalDeviceMemoryProperties(
+                self.physical_device,
+                std::ptr::addr_of_mut!(mem_props),
+            );
+        }
+
+        for idx in 0..mem_props.memoryTypeCount {
+            if (type_filter & (1 << idx)) != 0
+                && (mem_props.memoryTypes[idx as usize].propertyFlags & properties) == properties
+            {
+                return Ok(idx);
+            }
+        }
+
+        Err(String::from("Failed to find suitable memory type!"))
+    }
 }
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
         self.cleanup_swap_chain().unwrap();
+
+        if !self.vertex_buffer.is_null() {
+            unsafe {
+                ffi::vkDestroyBuffer(self.device, self.vertex_buffer, std::ptr::null());
+            }
+        }
+
+        if !self.vertex_buffer_memory.is_null() {
+            unsafe {
+                ffi::vkFreeMemory(self.device, self.vertex_buffer_memory, std::ptr::null());
+            }
+        }
 
         if !self.in_flight_fence.is_null() {
             unsafe {
