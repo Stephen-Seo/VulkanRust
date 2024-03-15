@@ -1,10 +1,13 @@
 use crate::ffi;
 
+type Vec2f = [f32; 2];
+type Vec3f = [f32; 3];
+
 #[repr(C)]
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Vertex {
-    pub pos: [f32; 2],
-    pub color: [f32; 3],
+    pub pos: Vec2f,
+    pub color: Vec3f,
 }
 
 impl Default for Vertex {
@@ -18,7 +21,7 @@ impl Default for Vertex {
 
 #[allow(dead_code)]
 impl Vertex {
-    pub fn new(pos: [f32; 2], color: [f32; 3]) -> Self {
+    pub fn new(pos: Vec2f, color: Vec3f) -> Self {
         Self { pos, color }
     }
 
@@ -27,8 +30,8 @@ impl Vertex {
     }
 
     pub const fn color_offset() -> usize {
-        let mut offset = std::mem::size_of::<[f32; 2]>();
-        let alignment = std::mem::align_of::<[f32; 3]>();
+        let mut offset = std::mem::size_of::<Vec2f>();
+        let alignment = std::mem::align_of::<Vec3f>();
         while offset % alignment != 0 {
             offset += 1;
         }
