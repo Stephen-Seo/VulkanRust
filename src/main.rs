@@ -1721,6 +1721,7 @@ impl VulkanApp {
         Err(String::from("Failed to find suitable memory type!"))
     }
 
+    #[allow(clippy::type_complexity)]
     fn create_vertex_input_state_info_struct() -> Result<
         (
             ffi::VkPipelineVertexInputStateCreateInfo,
