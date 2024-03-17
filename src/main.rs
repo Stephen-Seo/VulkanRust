@@ -1679,8 +1679,8 @@ impl VulkanApp {
             );
         }
 
-        {
-            let data_ptr_vertices: &mut [Vertex; 3] = unsafe { std::mem::transmute(data_ptr) };
+        unsafe {
+            let data_ptr_vertices: *mut [Vertex; 3] = std::mem::transmute(data_ptr);
             *data_ptr_vertices = VERTICES;
         }
 
