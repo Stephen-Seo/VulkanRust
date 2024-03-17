@@ -3,6 +3,8 @@ mod math3d;
 
 use std::collections::HashSet;
 use std::ffi::{c_void, CStr, CString};
+use std::ops::Deref;
+use std::pin::Pin;
 
 use math3d::Vertex;
 
@@ -949,19 +951,8 @@ impl VulkanApp {
         let shader_stages: [ffi::VkPipelineShaderStageCreateInfo; 2] =
             [vert_shader_stage_info, frag_shader_stage_info];
 
-        let mut vertex_input_info: ffi::VkPipelineVertexInputStateCreateInfo =
-            unsafe { std::mem::zeroed() };
-        vertex_input_info.sType =
-            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-
-        let bind_desc = Vertex::get_binding_description();
-        let attr_descs = Vertex::get_attribute_descriptions();
-
-        vertex_input_info.vertexBindingDescriptionCount = 1;
-        vertex_input_info.vertexAttributeDescriptionCount = attr_descs.len() as u32;
-
-        vertex_input_info.pVertexBindingDescriptions = std::ptr::addr_of!(bind_desc);
-        vertex_input_info.pVertexAttributeDescriptions = attr_descs.as_ptr();
+        let (vertex_input_info, _bind_desc, _attr_descs) =
+            Self::create_vertex_input_state_info_struct()?;
 
         let mut input_assembly: ffi::VkPipelineInputAssemblyStateCreateInfo =
             unsafe { std::mem::zeroed() };
@@ -1728,6 +1719,31 @@ impl VulkanApp {
         }
 
         Err(String::from("Failed to find suitable memory type!"))
+    }
+
+    fn create_vertex_input_state_info_struct() -> Result<
+        (
+            ffi::VkPipelineVertexInputStateCreateInfo,
+            Pin<Box<ffi::VkVertexInputBindingDescription>>,
+            Pin<Box<[ffi::VkVertexInputAttributeDescription; 2]>>,
+        ),
+        String,
+    > {
+        let mut vertex_input_info: ffi::VkPipelineVertexInputStateCreateInfo =
+            unsafe { std::mem::zeroed() };
+        vertex_input_info.sType =
+            ffi::VkStructureType_VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+        let bind_desc = Box::pin(Vertex::get_binding_description());
+        let attr_descs = Box::pin(Vertex::get_attribute_descriptions());
+
+        vertex_input_info.vertexBindingDescriptionCount = 1;
+        vertex_input_info.vertexAttributeDescriptionCount = attr_descs.len() as u32;
+
+        vertex_input_info.pVertexBindingDescriptions = bind_desc.deref();
+        vertex_input_info.pVertexAttributeDescriptions = attr_descs.as_ptr();
+
+        Ok((vertex_input_info, bind_desc, attr_descs))
     }
 }
 
