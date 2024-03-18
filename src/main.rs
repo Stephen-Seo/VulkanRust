@@ -1611,36 +1611,59 @@ impl VulkanApp {
     fn create_vertex_buffer(&mut self) -> Result<(), String> {
         let buffer_size: ffi::VkDeviceSize =
             (std::mem::size_of::<Vertex>() * VERTICES.len()) as u64;
-        let (buffer, buffer_mem) = self.create_buffer(
+
+        let (staging_buffer, staging_buffer_mem) = self.create_buffer(
             buffer_size,
-            ffi::VkBufferUsageFlagBits_VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            ffi::VkBufferUsageFlagBits_VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             ffi::VkMemoryPropertyFlagBits_VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
                 | ffi::VkMemoryPropertyFlagBits_VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         )?;
 
-        self.vertex_buffer = buffer;
-        self.vertex_buffer_memory = buffer_mem;
+        struct CleanupStaging {
+            device: ffi::VkDevice,
+            staging_buf: ffi::VkBuffer,
+            staging_buf_mem: ffi::VkDeviceMemory,
+        }
+        impl Drop for CleanupStaging {
+            fn drop(&mut self) {
+                unsafe {
+                    ffi::vkDestroyBuffer(self.device, self.staging_buf, std::ptr::null());
+                    ffi::vkFreeMemory(self.device, self.staging_buf_mem, std::ptr::null());
+                }
+            }
+        }
+        let _cleanup_staging = CleanupStaging {
+            device: self.device,
+            staging_buf: staging_buffer,
+            staging_buf_mem: staging_buffer_mem,
+        };
 
         let mut data_ptr: *mut c_void = unsafe { std::mem::zeroed() };
         unsafe {
             ffi::vkMapMemory(
                 self.device,
-                self.vertex_buffer_memory,
+                staging_buffer_mem,
                 0,
                 buffer_size,
                 0,
                 std::ptr::addr_of_mut!(data_ptr),
             );
-        }
-
-        unsafe {
             let data_ptr_vertices: *mut [Vertex; 3] = std::mem::transmute(data_ptr);
             *data_ptr_vertices = VERTICES;
+            ffi::vkUnmapMemory(self.device, staging_buffer_mem);
         }
 
-        unsafe {
-            ffi::vkUnmapMemory(self.device, self.vertex_buffer_memory);
-        }
+        let (buffer, buffer_mem) = self.create_buffer(
+            buffer_size,
+            ffi::VkBufferUsageFlagBits_VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                | ffi::VkBufferUsageFlagBits_VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            ffi::VkMemoryPropertyFlagBits_VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        )?;
+
+        self.vertex_buffer = buffer;
+        self.vertex_buffer_memory = buffer_mem;
+
+        self.copy_buffer(staging_buffer, self.vertex_buffer, buffer_size)?;
 
         Ok(())
     }
@@ -1759,6 +1782,77 @@ impl VulkanApp {
         }
 
         Ok((buffer, buffer_mem))
+    }
+
+    fn copy_buffer(
+        &mut self,
+        src_buffer: ffi::VkBuffer,
+        dst_buffer: ffi::VkBuffer,
+        size: ffi::VkDeviceSize,
+    ) -> Result<(), String> {
+        let mut alloc_info: ffi::VkCommandBufferAllocateInfo = unsafe { std::mem::zeroed() };
+        alloc_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_info.level = ffi::VkCommandBufferLevel_VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc_info.commandPool = self.command_pool;
+        alloc_info.commandBufferCount = 1;
+
+        let mut command_buffer: ffi::VkCommandBuffer = std::ptr::null_mut();
+
+        unsafe {
+            ffi::vkAllocateCommandBuffers(
+                self.device,
+                std::ptr::addr_of!(alloc_info),
+                std::ptr::addr_of_mut!(command_buffer),
+            );
+        }
+
+        let mut begin_info: ffi::VkCommandBufferBeginInfo = unsafe { std::mem::zeroed() };
+        begin_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags =
+            ffi::VkCommandBufferUsageFlagBits_VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        unsafe {
+            ffi::vkBeginCommandBuffer(command_buffer, std::ptr::addr_of!(begin_info));
+        }
+
+        let mut copy_region: ffi::VkBufferCopy = unsafe { std::mem::zeroed() };
+        copy_region.srcOffset = 0;
+        copy_region.dstOffset = 0;
+        copy_region.size = size;
+
+        unsafe {
+            ffi::vkCmdCopyBuffer(
+                command_buffer,
+                src_buffer,
+                dst_buffer,
+                1,
+                std::ptr::addr_of!(copy_region),
+            );
+            ffi::vkEndCommandBuffer(command_buffer);
+        }
+
+        let mut submit_info: ffi::VkSubmitInfo = unsafe { std::mem::zeroed() };
+        submit_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers = std::ptr::addr_of!(command_buffer);
+
+        unsafe {
+            ffi::vkQueueSubmit(
+                self.graphics_queue,
+                1,
+                std::ptr::addr_of!(submit_info),
+                std::ptr::null_mut(),
+            );
+            ffi::vkQueueWaitIdle(self.graphics_queue);
+            ffi::vkFreeCommandBuffers(
+                self.device,
+                self.command_pool,
+                1,
+                std::ptr::addr_of!(command_buffer),
+            );
+        }
+
+        Ok(())
     }
 }
 
