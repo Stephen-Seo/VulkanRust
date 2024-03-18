@@ -1609,63 +1609,17 @@ impl VulkanApp {
     }
 
     fn create_vertex_buffer(&mut self) -> Result<(), String> {
-        let mut buffer_info: ffi::VkBufferCreateInfo = unsafe { std::mem::zeroed() };
-
-        buffer_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        buffer_info.size = (std::mem::size_of::<Vertex>() * VERTICES.len()) as u64;
-        buffer_info.usage = ffi::VkBufferUsageFlagBits_VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        buffer_info.sharingMode = ffi::VkSharingMode_VK_SHARING_MODE_EXCLUSIVE;
-
-        let result = unsafe {
-            ffi::vkCreateBuffer(
-                self.device,
-                std::ptr::addr_of!(buffer_info),
-                std::ptr::null(),
-                std::ptr::addr_of_mut!(self.vertex_buffer),
-            )
-        };
-        if result != ffi::VkResult_VK_SUCCESS {
-            return Err(String::from("Failed to create vertex buffer!"));
-        }
-
-        let mut mem_reqs: ffi::VkMemoryRequirements = unsafe { std::mem::zeroed() };
-        unsafe {
-            ffi::vkGetBufferMemoryRequirements(
-                self.device,
-                self.vertex_buffer,
-                std::ptr::addr_of_mut!(mem_reqs),
-            );
-        }
-
-        let mut alloc_info: ffi::VkMemoryAllocateInfo = unsafe { std::mem::zeroed() };
-        alloc_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc_info.allocationSize = mem_reqs.size;
-        alloc_info.memoryTypeIndex = self.find_memory_type(
-            mem_reqs.memoryTypeBits,
+        let buffer_size: ffi::VkDeviceSize =
+            (std::mem::size_of::<Vertex>() * VERTICES.len()) as u64;
+        let (buffer, buffer_mem) = self.create_buffer(
+            buffer_size,
+            ffi::VkBufferUsageFlagBits_VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
             ffi::VkMemoryPropertyFlagBits_VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
                 | ffi::VkMemoryPropertyFlagBits_VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         )?;
 
-        let result = unsafe {
-            ffi::vkAllocateMemory(
-                self.device,
-                std::ptr::addr_of!(alloc_info),
-                std::ptr::null(),
-                std::ptr::addr_of_mut!(self.vertex_buffer_memory),
-            )
-        };
-        if result != ffi::VkResult_VK_SUCCESS {
-            return Err(String::from("Failed to allocate vertex buffer memory!"));
-        }
-
-        unsafe {
-            ffi::vkBindBufferMemory(
-                self.device,
-                self.vertex_buffer,
-                self.vertex_buffer_memory,
-                0,
-            );
-        }
+        self.vertex_buffer = buffer;
+        self.vertex_buffer_memory = buffer_mem;
 
         let mut data_ptr: *mut c_void = unsafe { std::mem::zeroed() };
         unsafe {
@@ -1673,7 +1627,7 @@ impl VulkanApp {
                 self.device,
                 self.vertex_buffer_memory,
                 0,
-                buffer_info.size,
+                buffer_size,
                 0,
                 std::ptr::addr_of_mut!(data_ptr),
             );
@@ -1745,6 +1699,66 @@ impl VulkanApp {
         vertex_input_info.pVertexAttributeDescriptions = attr_descs.as_ptr();
 
         Ok((vertex_input_info, bind_desc, attr_descs))
+    }
+
+    fn create_buffer(
+        &mut self,
+        size: ffi::VkDeviceSize,
+        usage: ffi::VkBufferUsageFlags,
+        properties: ffi::VkMemoryPropertyFlags,
+    ) -> Result<(ffi::VkBuffer, ffi::VkDeviceMemory), String> {
+        let mut buffer_info: ffi::VkBufferCreateInfo = unsafe { std::mem::zeroed() };
+        buffer_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buffer_info.size = size;
+        buffer_info.usage = usage;
+        buffer_info.sharingMode = ffi::VkSharingMode_VK_SHARING_MODE_EXCLUSIVE;
+
+        let mut buffer: ffi::VkBuffer = std::ptr::null_mut();
+        let result = unsafe {
+            ffi::vkCreateBuffer(
+                self.device,
+                std::ptr::addr_of!(buffer_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(buffer),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            return Err(String::from("Failed to create buffer!"));
+        }
+
+        let mut mem_req: ffi::VkMemoryRequirements = unsafe { std::mem::zeroed() };
+        unsafe {
+            ffi::vkGetBufferMemoryRequirements(
+                self.device,
+                buffer,
+                std::ptr::addr_of_mut!(mem_req),
+            );
+        }
+
+        let mut alloc_info: ffi::VkMemoryAllocateInfo = unsafe { std::mem::zeroed() };
+        alloc_info.sType = ffi::VkStructureType_VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc_info.allocationSize = mem_req.size;
+        alloc_info.memoryTypeIndex = self.find_memory_type(mem_req.memoryTypeBits, properties)?;
+
+        let mut buffer_mem: ffi::VkDeviceMemory = std::ptr::null_mut();
+
+        let result = unsafe {
+            ffi::vkAllocateMemory(
+                self.device,
+                std::ptr::addr_of!(alloc_info),
+                std::ptr::null(),
+                std::ptr::addr_of_mut!(buffer_mem),
+            )
+        };
+        if result != ffi::VkResult_VK_SUCCESS {
+            return Err(String::from("Failed to allocate buffer memory"));
+        }
+
+        unsafe {
+            ffi::vkBindBufferMemory(self.device, buffer, buffer_mem, 0);
+        }
+
+        Ok((buffer, buffer_mem))
     }
 }
 
