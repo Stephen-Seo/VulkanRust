@@ -1,4 +1,5 @@
 mod ffi;
+mod helper;
 mod math3d;
 
 use std::collections::HashSet;
@@ -1619,24 +1620,18 @@ impl VulkanApp {
                 | ffi::VkMemoryPropertyFlagBits_VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
         )?;
 
-        struct CleanupStaging {
-            device: ffi::VkDevice,
-            staging_buf: ffi::VkBuffer,
-            staging_buf_mem: ffi::VkDeviceMemory,
-        }
-        impl Drop for CleanupStaging {
-            fn drop(&mut self) {
-                unsafe {
-                    ffi::vkDestroyBuffer(self.device, self.staging_buf, std::ptr::null());
-                    ffi::vkFreeMemory(self.device, self.staging_buf_mem, std::ptr::null());
-                }
-            }
-        }
-        let _cleanup_staging = CleanupStaging {
-            device: self.device,
-            staging_buf: staging_buffer,
-            staging_buf_mem: staging_buffer_mem,
-        };
+        let _inst;
+        cleanup_func!(
+            func: move || unsafe {
+                ffi::vkDestroyBuffer(device_copy, staging_buf_copy, std::ptr::null());
+                ffi::vkFreeMemory(device_copy, staging_buf_mem_copy, std::ptr::null());
+            },
+            name: CleanupStaging,
+            hold_name: _inst,
+            var_pair: self.device, device_copy,
+            var_pair: staging_buffer, staging_buf_copy,
+            var_pair: staging_buffer_mem, staging_buf_mem_copy
+        );
 
         let mut data_ptr: *mut c_void = unsafe { std::mem::zeroed() };
         unsafe {
