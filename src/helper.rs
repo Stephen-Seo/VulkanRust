@@ -1,6 +1,11 @@
 #[macro_export]
 macro_rules! cleanup_func {
-    (func: $cleanup_fn:expr, name: $name:ident, hold_name: $hold_name:ident) => {
+    (func: $cleanup_fn:expr,
+     name: $name:ident,
+     hold_name: $hold_name:ident,
+     $(var_pair: $orig_var:expr, $new_var:ident),*) => {
+        $(let $new_var = $orig_var;)*
+
         struct $name <T: Fn() -> ()> {
             func: T,
         }
@@ -16,12 +21,7 @@ macro_rules! cleanup_func {
                 }
             }
         }
+
         $hold_name = $name::new($cleanup_fn);
-    };
-    (func: $cleanup_fn:expr, name: $name:ident, hold_name: $hold_name:ident, $(var_pair: $orig_var:expr, $new_var:ident),*) => {
-        {
-            $(let $new_var = $orig_var;)*
-            cleanup_func!(func: $cleanup_fn, name: $name, hold_name: $hold_name);
-        }
     }
 }
