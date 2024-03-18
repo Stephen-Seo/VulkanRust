@@ -6,15 +6,15 @@ macro_rules! cleanup_func {
      $(var_pair: $orig_var:expr, $new_var:ident),*) => {
         $(let $new_var = $orig_var;)*
 
-        struct $name <T: Fn() -> ()> {
+        struct $name <T: Fn()> {
             func: T,
         }
-        impl<T> Drop for $name <T> where T: Fn() -> () {
+        impl<T> Drop for $name <T> where T: Fn() {
             fn drop(&mut self) {
                 (self.func)();
             }
         }
-        impl<T> $name <T> where T: Fn() -> () {
+        impl<T> $name <T> where T: Fn() {
             fn new(func: T) -> Self {
                 Self {
                     func,
