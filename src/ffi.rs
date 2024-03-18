@@ -3,6 +3,8 @@
 #![allow(non_snake_case)]
 #![allow(unused_imports)]
 #![allow(dead_code)]
+#![allow(clippy::complexity)]
+#![allow(clippy::style)]
 include!(concat!(env!("OUT_DIR"), "/glfw_vk_bindings.rs"));
 
 pub fn VK_MAKE_VERSION(major: u32, minor: u32, patch: u32) -> u32 {
