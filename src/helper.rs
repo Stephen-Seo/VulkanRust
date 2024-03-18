@@ -15,7 +15,7 @@ macro_rules! cleanup_func {
             }
         }
         impl<T> $name <T> where T: Fn() -> () {
-            fn new(func: T) -> Self where T: Fn() -> () {
+            fn new(func: T) -> Self {
                 Self {
                     func,
                 }
