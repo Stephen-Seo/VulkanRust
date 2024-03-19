@@ -1,5 +1,5 @@
 [package]
-name = "vulkan_tri_rust"
+name = "vulkan_rust"
 version = "1.1.0"
 edition = "2021"
 
