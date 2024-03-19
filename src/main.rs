@@ -28,20 +28,26 @@ const DYNAMIC_STATES: [ffi::VkDynamicState; 2] = [
 const DEVICE_EXTENSIONS: [*const i8; 1] =
     [ffi::VK_KHR_SWAPCHAIN_EXTENSION_NAME as *const u8 as *const i8];
 
-const VERTICES: [Vertex; 3] = [
+const VERTICES: [Vertex; 4] = [
     Vertex {
-        pos: [0.0, -0.5],
+        pos: [-0.5, -0.5],
         color: [1.0, 0.0, 0.0],
     },
     Vertex {
-        pos: [0.5, 0.5],
+        pos: [0.5, -0.5],
         color: [0.0, 1.0, 0.0],
     },
     Vertex {
-        pos: [-0.5, 0.5],
+        pos: [0.5, 0.5],
         color: [0.0, 0.0, 1.0],
     },
+    Vertex {
+        pos: [-0.5, 0.5],
+        color: [1.0, 1.0, 1.0],
+    },
 ];
+
+const VERTEX_INDICES: [u16; 6] = [0, 1, 2, 2, 3, 0];
 
 fn check_validation_layer_support() -> bool {
     let mut layer_count: u32 = 0;
@@ -211,6 +217,8 @@ struct VulkanApp {
     framebuffer_resized: bool,
     vertex_buffer: ffi::VkBuffer,
     vertex_buffer_memory: ffi::VkDeviceMemory,
+    index_buffer: ffi::VkBuffer,
+    index_buffer_memory: ffi::VkDeviceMemory,
 }
 
 impl VulkanApp {
@@ -241,6 +249,8 @@ impl VulkanApp {
             framebuffer_resized: false,
             vertex_buffer: std::ptr::null_mut(),
             vertex_buffer_memory: std::ptr::null_mut(),
+            index_buffer: std::ptr::null_mut(),
+            index_buffer_memory: std::ptr::null_mut(),
         }
     }
 
@@ -285,6 +295,7 @@ impl VulkanApp {
         self.create_framebuffers().unwrap();
         self.create_command_pool().unwrap();
         self.create_vertex_buffer().unwrap();
+        self.create_index_buffer().unwrap();
         self.create_command_buffer().unwrap();
         self.create_sync_objects().unwrap();
     }
@@ -1400,6 +1411,12 @@ impl VulkanApp {
                 std::ptr::addr_of!(self.vertex_buffer),
                 offsets.as_ptr(),
             );
+            ffi::vkCmdBindIndexBuffer(
+                command_buffer,
+                self.index_buffer,
+                0,
+                ffi::VkIndexType_VK_INDEX_TYPE_UINT16,
+            );
         }
 
         let viewport = self.create_viewport();
@@ -1412,7 +1429,7 @@ impl VulkanApp {
 
         unsafe {
             ffi::vkCmdSetScissor(command_buffer, 0, 1, std::ptr::addr_of!(scissor));
-            ffi::vkCmdDraw(command_buffer, VERTICES.len() as u32, 1, 0, 0);
+            ffi::vkCmdDrawIndexed(command_buffer, VERTEX_INDICES.len() as u32, 1, 0, 0, 0);
             ffi::vkCmdEndRenderPass(command_buffer);
 
             if ffi::vkEndCommandBuffer(command_buffer) != ffi::VkResult_VK_SUCCESS {
@@ -1643,7 +1660,7 @@ impl VulkanApp {
                 0,
                 std::ptr::addr_of_mut!(data_ptr),
             );
-            let data_ptr_vertices: *mut [Vertex; 3] = std::mem::transmute(data_ptr);
+            let data_ptr_vertices: *mut [Vertex; VERTICES.len()] = std::mem::transmute(data_ptr);
             *data_ptr_vertices = VERTICES;
             ffi::vkUnmapMemory(self.device, staging_buffer_mem);
         }
@@ -1849,11 +1866,76 @@ impl VulkanApp {
 
         Ok(())
     }
+
+    fn create_index_buffer(&mut self) -> Result<(), String> {
+        let buffer_size: ffi::VkDeviceSize =
+            (std::mem::size_of::<u16>() * VERTEX_INDICES.len()) as u64;
+
+        let (buf, buf_mem) = self.create_buffer(
+            buffer_size,
+            ffi::VkBufferUsageFlagBits_VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            ffi::VkMemoryPropertyFlagBits_VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                | ffi::VkMemoryPropertyFlagBits_VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        )?;
+        let _staging_inst;
+        cleanup_func!(
+            func: move || unsafe {
+                ffi::vkDestroyBuffer(device_copy, buf_copy, std::ptr::null());
+                ffi::vkFreeMemory(device_copy, buf_mem_copy, std::ptr::null());
+            },
+            name: CleanupIdxStaging,
+            hold_name: _staging_inst,
+            var_pair: self.device, device_copy,
+            var_pair: buf, buf_copy,
+            var_pair: buf_mem, buf_mem_copy
+        );
+
+        let mut data_ptr: *mut c_void = std::ptr::null_mut();
+        unsafe {
+            ffi::vkMapMemory(
+                self.device,
+                buf_mem,
+                0,
+                buffer_size,
+                0,
+                std::ptr::addr_of_mut!(data_ptr),
+            );
+            let data_ptr_indices: *mut [u16; VERTEX_INDICES.len()] = std::mem::transmute(data_ptr);
+            *data_ptr_indices = VERTEX_INDICES;
+            ffi::vkUnmapMemory(self.device, buf_mem);
+        }
+
+        let (idx_buf, idx_buf_mem) = self.create_buffer(
+            buffer_size,
+            ffi::VkBufferUsageFlagBits_VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                | ffi::VkBufferUsageFlagBits_VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+            ffi::VkMemoryPropertyFlagBits_VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        )?;
+
+        self.index_buffer = idx_buf;
+        self.index_buffer_memory = idx_buf_mem;
+
+        self.copy_buffer(buf, self.index_buffer, buffer_size)?;
+
+        Ok(())
+    }
 }
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
         self.cleanup_swap_chain().unwrap();
+
+        if !self.index_buffer.is_null() {
+            unsafe {
+                ffi::vkDestroyBuffer(self.device, self.index_buffer, std::ptr::null());
+            }
+        }
+
+        if !self.index_buffer_memory.is_null() {
+            unsafe {
+                ffi::vkFreeMemory(self.device, self.index_buffer_memory, std::ptr::null());
+            }
+        }
 
         if !self.vertex_buffer.is_null() {
             unsafe {
