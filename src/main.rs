@@ -1643,7 +1643,6 @@ impl VulkanApp {
                 ffi::vkDestroyBuffer(device_copy, staging_buf_copy, std::ptr::null());
                 ffi::vkFreeMemory(device_copy, staging_buf_mem_copy, std::ptr::null());
             },
-            name: CleanupStaging,
             hold_name: _inst,
             var_pair: self.device, device_copy,
             var_pair: staging_buffer, staging_buf_copy,
@@ -1883,7 +1882,6 @@ impl VulkanApp {
                 ffi::vkDestroyBuffer(device_copy, buf_copy, std::ptr::null());
                 ffi::vkFreeMemory(device_copy, buf_mem_copy, std::ptr::null());
             },
-            name: CleanupIdxStaging,
             hold_name: _staging_inst,
             var_pair: self.device, device_copy,
             var_pair: buf, buf_copy,
